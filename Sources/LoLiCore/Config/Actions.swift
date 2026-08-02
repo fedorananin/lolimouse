@@ -115,6 +115,17 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
     /// Launch an application by bundle identifier.
     case launchApp(String)
 
+    // Media and hardware keys, sent as the same system-defined events the
+    // keyboard's function row produces.
+    case volumeUp
+    case volumeDown
+    case mute
+    case playPause
+    case mediaNext
+    case mediaPrevious
+    case brightnessUp
+    case brightnessDown
+
     public var displayName: String {
         switch self {
         case .none: return "Do nothing"
@@ -135,6 +146,14 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
         case let .dpiPreset(index): return "DPI preset \(index + 1)"
         case .toggleWheelRatchet: return "Toggle wheel ratchet"
         case let .launchApp(bundleID): return "Open \(bundleID)"
+        case .volumeUp: return "Volume up"
+        case .volumeDown: return "Volume down"
+        case .mute: return "Mute"
+        case .playPause: return "Play / pause"
+        case .mediaNext: return "Next track"
+        case .mediaPrevious: return "Previous track"
+        case .brightnessUp: return "Display brightness up"
+        case .brightnessDown: return "Display brightness down"
         }
     }
 
@@ -146,6 +165,9 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
             .spaceLeft, .spaceRight,
             .back, .forward,
             .zoomIn, .zoomOut,
+            .volumeUp, .volumeDown, .mute,
+            .playPause, .mediaNext, .mediaPrevious,
+            .brightnessUp, .brightnessDown,
             .cycleDPIPresets, .toggleWheelRatchet,
         ]
     }

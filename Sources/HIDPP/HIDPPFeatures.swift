@@ -90,14 +90,31 @@ public struct HIDPPBattery: Equatable {
 
 public extension HIDPPTarget {
     func battery() -> Result<HIDPPBattery, HIDPPError> {
-        // getStatus → [stateOfCharge, level, status, externalPowerStatus]
-        call(.unifiedBattery, function: 1).flatMap { response in
-            guard let charge = response.byte(0), let status = response.byte(2) else {
+        if supports(.unifiedBattery) {
+            // getStatus → [stateOfCharge, level, status, externalPowerStatus]
+            return call(.unifiedBattery, function: 1).flatMap { response in
+                guard let charge = response.byte(0), let status = response.byte(2) else {
+                    return .failure(.malformedResponse)
+                }
+                return .success(HIDPPBattery(
+                    percentage: charge <= 100 ? Int(charge) : nil,
+                    charging: status == 1 || status == 2
+                ))
+            }
+        }
+
+        // Older firmware ships 0x1000 Battery Status instead.
+        // getBatteryLevelStatus → [dischargeLevel %, dischargeNextLevel, status]
+        // A discharge level of 0 means "unknown", not an empty battery.
+        // Status 1…4 are the charging states (recharging, final stage,
+        // complete, recharging below optimal speed).
+        return call(.batteryStatus, function: 0).flatMap { response in
+            guard let level = response.byte(0), let status = response.byte(2) else {
                 return .failure(.malformedResponse)
             }
             return .success(HIDPPBattery(
-                percentage: charge <= 100 ? Int(charge) : nil,
-                charging: status == 1 || status == 2
+                percentage: (1 ... 100).contains(level) ? Int(level) : nil,
+                charging: (1 ... 4).contains(status)
             ))
         }
     }

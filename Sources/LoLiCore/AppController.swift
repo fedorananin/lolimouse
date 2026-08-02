@@ -36,11 +36,15 @@ public final class AppController: ObservableObject {
     /// One scroll processor per device, so accumulator state is not shared
     /// between a mouse and a trackball plugged in at the same time.
     private var scrollProcessors: [String: ScrollProcessor] = [:]
+    /// One modifier transformer per device, for the same reason — pinch state
+    /// must not leak between devices.
+    private var modifierTransformers: [String: ModifierKeyTransformer] = [:]
     /// Only ever touched from the event thread.
     private var swallowedButtons: Set<Int> = []
 
     private var subscriptions = Set<AnyCancellable>()
     private var permissionTimer: Timer?
+    private var batteryTimer: Timer?
 
     private init() {
         actions.onDeviceAction = { [weak self] action, device in
@@ -80,6 +84,12 @@ public final class AppController: ObservableObject {
             self?.refreshPermissions()
         }
 
+        // Battery drains over hours; ten minutes keeps the reading honest
+        // without waking the mouse's radio for nothing.
+        batteryTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
+            self?.registry.refreshBatteries()
+        }
+
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
@@ -89,6 +99,7 @@ public final class AppController: ObservableObject {
             // volatile hardware setting at once.
             os_log("woke from sleep; reapplying everything", log: Self.log, type: .info)
             self?.reconcileAll(confirm: true, reason: "system wake")
+            self?.registry.refreshBatteries()
         }
     }
 
@@ -98,8 +109,9 @@ public final class AppController: ObservableObject {
 
         permissionTimer?.invalidate()
         permissionTimer = nil
-        eventTap?.stop()
-        eventTap = nil
+        batteryTimer?.invalidate()
+        batteryTimer = nil
+        removeEventTap()
         router.detachAll()
         reconciler.restoreAll(devices: registry.devices)
         registry.stop()
@@ -176,15 +188,29 @@ public final class AppController: ObservableObject {
             if eventTap != nil {
                 os_log("no scrolling or button settings are active; removing the event tap",
                        log: Self.log, type: .info)
-                eventTap?.stop()
-                eventTap = nil
+                removeEventTap()
             }
             return
         }
 
+        // `flagsChanged` is watched only while some device binds a modifier to
+        // pinch zoom — it is what ends the synthesised gesture. Every other
+        // configuration keeps the narrower mask.
+        var watched = EventTap.defaultWatchedEvents
+        let wantsFlags = configuration.enabled && registry.devices.contains {
+            configuration.device($0.key).scrolling.wantsFlagsChanged
+        }
+        if wantsFlags { watched.append(.flagsChanged) }
+
+        if let eventTap, eventTap.watchedEvents != watched {
+            os_log("the set of watched events changed; replacing the event tap",
+                   log: Self.log, type: .info)
+            removeEventTap()
+        }
+
         guard eventTap == nil, EventTap.hasAccessibilityPermission else { return }
 
-        let tap = EventTap { [weak self] event, type in
+        let tap = EventTap(watchedEvents: watched) { [weak self] event, type in
             self?.handle(event: event, type: type) ?? event
         }
         tap.onPermissionLost = { [weak self] in
@@ -193,6 +219,16 @@ public final class AppController: ObservableObject {
         }
         _ = tap.start()
         eventTap = tap
+    }
+
+    /// Stops the tap and ends any synthesised gesture still in flight, so an
+    /// application never sees a pinch that began and never ended.
+    private func removeEventTap() {
+        eventTap?.stop()
+        eventTap = nil
+        for transformer in modifierTransformers.values {
+            transformer.deactivate()
+        }
     }
 
     /// Runs on the event thread for every input event in the system. Anything
@@ -213,6 +249,14 @@ public final class AppController: ObservableObject {
         switch type {
         case .scrollWheel:
             return handleScroll(event, snapshot: snapshot)
+        case .flagsChanged:
+            // A modifier was pressed or released. Devices cannot be told apart
+            // here (the event comes from the keyboard), so every transformer
+            // gets the chance to end its pinch. Never swallowed.
+            for transformer in snapshot.modifierTransformers.values {
+                _ = transformer.process(event, type: type)
+            }
+            return event
         case .otherMouseDown, .otherMouseUp:
             return handleButton(event, type: type, snapshot: snapshot)
         default:
@@ -221,12 +265,15 @@ public final class AppController: ObservableObject {
     }
 
     private func handleScroll(_ event: CGEvent, snapshot: EventSnapshot) -> CGEvent? {
-        guard let key = snapshot.deviceKey(for: event),
-              let processor = snapshot.processors[key]
-        else {
-            return event
+        guard let key = snapshot.deviceKey(for: event) else { return event }
+
+        var current = event
+        if let transformer = snapshot.modifierTransformers[key] {
+            guard let transformed = transformer.process(current, type: .scrollWheel) else { return nil }
+            current = transformed
         }
-        return processor.process(event)
+        guard let processor = snapshot.processors[key] else { return current }
+        return processor.process(current)
     }
 
     private func handleButton(_ event: CGEvent, type: CGEventType, snapshot: EventSnapshot) -> CGEvent? {
@@ -240,7 +287,11 @@ public final class AppController: ObservableObject {
         }
 
         guard let key = snapshot.deviceKey(for: event),
-              let mapping = snapshot.buttonMappings[key]?.first(where: { $0.button == button })
+              let mapping = ButtonMapping.bestMatch(
+                  in: snapshot.buttonMappings[key] ?? [],
+                  button: button,
+                  held: ModifierKey.held(in: event.flags)
+              )
         else {
             return event
         }
@@ -260,6 +311,7 @@ public final class AppController: ObservableObject {
         /// would be worse than doing nothing.
         var soleConfiguredKey: String?
         var processors: [String: ScrollProcessor] = [:]
+        var modifierTransformers: [String: ModifierKeyTransformer] = [:]
         var buttonMappings: [String: [ButtonMapping]] = [:]
         var devices: [String: ManagedDevice] = [:]
 
@@ -330,6 +382,7 @@ public final class AppController: ObservableObject {
         let configuration = store.configuration
 
         var processors: [String: ScrollProcessor] = [:]
+        var transformers: [String: ModifierKeyTransformer] = [:]
         var senderToKey: [UInt64: String] = [:]
         var buttonMappings: [String: [ButtonMapping]] = [:]
         var deviceMap: [String: ManagedDevice] = [:]
@@ -344,6 +397,16 @@ public final class AppController: ObservableObject {
             processor.highResolutionMultiplier = multiplier(for: device)
             processors[device.key] = processor
 
+            // Same for the modifier transformer: replacing it mid-pinch would
+            // strand the gesture without its "ended" event.
+            if let actions = deviceConfiguration.scrolling.modifiers.effective, !actions.isEmpty {
+                let transformer = modifierTransformers[device.key] ?? ModifierKeyTransformer()
+                transformer.actions = actions
+                transformers[device.key] = transformer
+            } else if let existing = modifierTransformers[device.key] {
+                existing.deactivate()
+            }
+
             for senderID in device.senderIDs {
                 senderToKey[senderID] = device.key
             }
@@ -354,6 +417,7 @@ public final class AppController: ObservableObject {
         }
 
         scrollProcessors = processors
+        modifierTransformers = transformers
 
         let configured = devices.filter { configuration.devices[$0.key] != nil }
 
@@ -363,6 +427,7 @@ public final class AppController: ObservableObject {
             senderToKey: senderToKey,
             soleConfiguredKey: configured.count == 1 ? configured.first?.key : nil,
             processors: processors,
+            modifierTransformers: transformers,
             buttonMappings: buttonMappings,
             devices: deviceMap
         )

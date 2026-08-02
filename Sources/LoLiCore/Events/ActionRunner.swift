@@ -73,12 +73,50 @@ public final class ActionRunner {
         case let .launchApp(bundleID):
             launch(bundleID)
 
+        case .volumeUp:
+            postSystemKey(.soundUp)
+
+        case .volumeDown:
+            postSystemKey(.soundDown)
+
+        case .mute:
+            postSystemKey(.mute)
+
+        case .playPause:
+            postSystemKey(.play)
+
+        case .mediaNext:
+            postSystemKey(.next)
+
+        case .mediaPrevious:
+            postSystemKey(.previous)
+
+        case .brightnessUp:
+            postSystemKey(.brightnessUp)
+
+        case .brightnessDown:
+            postSystemKey(.brightnessDown)
+
         case .cycleDPIPresets, .dpiPreset, .toggleWheelRatchet:
             let handler = onDeviceAction
             DispatchQueue.main.async { handler?(action, device) }
         }
 
         return true
+    }
+
+    /// The NX_KEYTYPE_* codes from IOKit's ev_keymap.h. Media and brightness
+    /// keys are not ordinary key codes: they travel as "system-defined"
+    /// events, the same channel the keyboard's function row uses.
+    public enum SystemKey: Int32 {
+        case soundUp = 0
+        case soundDown = 1
+        case brightnessUp = 2
+        case brightnessDown = 3
+        case mute = 7
+        case play = 16
+        case next = 17
+        case previous = 18
     }
 
     // MARK: - Synthesis
@@ -99,6 +137,33 @@ public final class ActionRunner {
 
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
+    }
+
+    private func postSystemKey(_ key: SystemKey) {
+        // A press is a down (0x0A) followed by an up (0x0B), both packed into
+        // data1 the way NSEvent.systemDefined subtype 8 expects:
+        // key code in the top 16 bits, key state in bits 8–15.
+        func post(down: Bool) {
+            let state: Int32 = down ? 0x0A : 0x0B
+            guard let event = NSEvent.otherEvent(
+                with: .systemDefined,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: 0,
+                context: nil,
+                subtype: 8,
+                data1: Int((key.rawValue << 16) | (state << 8)),
+                data2: -1
+            ), let cgEvent = event.cgEvent else {
+                return
+            }
+            cgEvent.markSynthetic()
+            cgEvent.post(tap: .cghidEventTap)
+        }
+
+        post(down: true)
+        post(down: false)
     }
 
     private func postMouseButton(_ button: Int) {

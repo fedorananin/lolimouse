@@ -197,9 +197,30 @@ struct DeviceDetailView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            batteryBadge
             statusBadge
         }
         .padding(20)
+    }
+
+    @ViewBuilder
+    private var batteryBadge: some View {
+        if let battery = device.battery, let percentage = battery.percentage {
+            Label("\(percentage)%", systemImage: batteryIcon(percentage, charging: battery.charging))
+                .foregroundStyle(percentage <= 10 && !battery.charging ? Color.orange : Color.secondary)
+                .help(battery.charging ? "Charging" : "Battery level")
+        }
+    }
+
+    private func batteryIcon(_ percentage: Int, charging: Bool) -> String {
+        if charging { return "battery.100percent.bolt" }
+        switch percentage {
+        case ..<13: return "battery.0percent"
+        case ..<38: return "battery.25percent"
+        case ..<63: return "battery.50percent"
+        case ..<88: return "battery.75percent"
+        default: return "battery.100percent"
+        }
     }
 
     @ViewBuilder

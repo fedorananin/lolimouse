@@ -213,9 +213,106 @@ public struct AxisScrolling: Codable, Equatable, Sendable {
     }
 }
 
+/// A modifier key that can change what the scroll wheel does while held.
+public enum ModifierKey: String, Codable, Equatable, CaseIterable, Sendable {
+    case command, shift, option, control
+
+    public var displayName: String {
+        switch self {
+        case .command: return "⌘ Command"
+        case .shift: return "⇧ Shift"
+        case .option: return "⌥ Option"
+        case .control: return "⌃ Control"
+        }
+    }
+}
+
+/// What scrolling does while a modifier key is held.
+///
+/// One map covers both axes: a modifier changes what *the wheel* does, and
+/// splitting that decision per axis doubles the UI for a distinction nobody
+/// asked for. (LinearMouse configures the two axes separately; if that ever
+/// turns out to matter, the map moves into `AxisScrolling`.)
+public enum ModifierKeyAction: Codable, Hashable, Sendable {
+    /// Strip the modifier so applications see a plain scroll — the wheel keeps
+    /// scrolling instead of triggering the app's own modifier behaviour.
+    case ignore
+    /// Swallow the event entirely.
+    case preventDefault
+    /// Swap the vertical and horizontal axes.
+    case alterOrientation
+    /// Multiply the scroll distance.
+    case changeSpeed(Double)
+    /// Send the application's zoom shortcut (⌘= / ⌘−) per wheel click.
+    case zoom
+    case zoomReversed
+    /// Synthesise a trackpad pinch, for the smooth zoom apps reserve for it.
+    case pinchZoom
+    case pinchZoomReversed
+
+    public var displayName: String {
+        switch self {
+        case .ignore: return "Scroll (ignore the modifier)"
+        case .preventDefault: return "Do nothing"
+        case .alterOrientation: return "Swap axes"
+        case .changeSpeed: return "Change speed"
+        case .zoom: return "Zoom (⌘= / ⌘−)"
+        case .zoomReversed: return "Zoom, reversed"
+        case .pinchZoom: return "Pinch zoom (smooth)"
+        case .pinchZoomReversed: return "Pinch zoom, reversed"
+        }
+    }
+
+    // `changeSpeed` carries a payload, so the compiler-written conformance
+    // would encode it as a nested container; a flat `type` + `scale` object
+    // keeps the config file hand-editable.
+    private enum CodingKeys: String, CodingKey { case type, scale }
+
+    private enum Kind: String, Codable {
+        case ignore, preventDefault, alterOrientation, changeSpeed
+        case zoom, zoomReversed, pinchZoom, pinchZoomReversed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .type) {
+        case .ignore: self = .ignore
+        case .preventDefault: self = .preventDefault
+        case .alterOrientation: self = .alterOrientation
+        case .changeSpeed:
+            self = .changeSpeed(try container.decodeIfPresent(Double.self, forKey: .scale) ?? 2)
+        case .zoom: self = .zoom
+        case .zoomReversed: self = .zoomReversed
+        case .pinchZoom: self = .pinchZoom
+        case .pinchZoomReversed: self = .pinchZoomReversed
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .ignore: try container.encode(Kind.ignore, forKey: .type)
+        case .preventDefault: try container.encode(Kind.preventDefault, forKey: .type)
+        case .alterOrientation: try container.encode(Kind.alterOrientation, forKey: .type)
+        case let .changeSpeed(scale):
+            try container.encode(Kind.changeSpeed, forKey: .type)
+            try container.encode(scale, forKey: .scale)
+        case .zoom: try container.encode(Kind.zoom, forKey: .type)
+        case .zoomReversed: try container.encode(Kind.zoomReversed, forKey: .type)
+        case .pinchZoom: try container.encode(Kind.pinchZoom, forKey: .type)
+        case .pinchZoomReversed: try container.encode(Kind.pinchZoomReversed, forKey: .type)
+        }
+    }
+}
+
 public struct ScrollingSettings: Codable, Equatable, Sendable {
     public var vertical: AxisScrolling
     public var horizontal: AxisScrolling
+
+    /// What the wheel does while a modifier key is held. A modifier that is
+    /// absent from the map behaves normally — the event passes through with
+    /// its flag intact.
+    public var modifiers: Setting<[ModifierKey: ModifierKeyAction]>
 
     /// Collapse the device's high-resolution wheel stream back into whole
     /// detents.
@@ -230,15 +327,26 @@ public struct ScrollingSettings: Codable, Equatable, Sendable {
     public init(
         vertical: AxisScrolling = AxisScrolling(),
         horizontal: AxisScrolling = AxisScrolling(),
-        normalizeHighResolutionWheel: Setting<Bool> = .off(true)
+        normalizeHighResolutionWheel: Setting<Bool> = .off(true),
+        modifiers: Setting<[ModifierKey: ModifierKeyAction]> = .off([.command: .zoom])
     ) {
         self.vertical = vertical
         self.horizontal = horizontal
         self.normalizeHighResolutionWheel = normalizeHighResolutionWheel
+        self.modifiers = modifiers
     }
 
     public var managesAnything: Bool {
-        vertical.managesAnything || horizontal.managesAnything || normalizeHighResolutionWheel.enabled
+        vertical.managesAnything || horizontal.managesAnything
+            || normalizeHighResolutionWheel.enabled || modifiers.enabled
+    }
+
+    /// Whether any modifier is bound to a pinch action, which is the one case
+    /// where the event tap also has to watch `flagsChanged` — releasing the
+    /// modifier is what ends the synthesised gesture.
+    public var wantsFlagsChanged: Bool {
+        guard let actions = modifiers.effective else { return false }
+        return actions.values.contains { $0 == .pinchZoom || $0 == .pinchZoomReversed }
     }
 }
 
@@ -249,12 +357,38 @@ public struct ButtonMapping: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     /// CoreGraphics button number, 0-based.
     public var button: Int
+    /// Modifier keys that must be held for this mapping to fire, so the same
+    /// button can do different things plain and with ⌘. Empty means "any".
+    public var modifiers: Set<ModifierKey>
     public var action: Action
 
-    public init(id: UUID = UUID(), button: Int, action: Action) {
+    public init(id: UUID = UUID(), button: Int, modifiers: Set<ModifierKey> = [], action: Action) {
         self.id = id
         self.button = button
+        self.modifiers = modifiers
         self.action = action
+    }
+
+    // Config files written before modifiers existed have no `modifiers` key.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        button = try container.decode(Int.self, forKey: .button)
+        modifiers = try container.decodeIfPresent(Set<ModifierKey>.self, forKey: .modifiers) ?? []
+        action = try container.decode(Action.self, forKey: .action)
+    }
+
+    /// The mapping that should fire for `button` with `held` modifiers down:
+    /// the most specific one whose required modifiers are all held. A mapping
+    /// with no modifiers is the fallback and matches anything.
+    public static func bestMatch(
+        in mappings: [ButtonMapping],
+        button: Int,
+        held: Set<ModifierKey>
+    ) -> ButtonMapping? {
+        mappings
+            .filter { $0.button == button && $0.modifiers.isSubset(of: held) }
+            .max { $0.modifiers.count < $1.modifiers.count }
     }
 }
 
@@ -404,6 +538,15 @@ public struct Configuration: Codable, Equatable, Sendable {
 
 // `[GestureDirection: Action]` needs a keyed representation that survives JSON.
 extension GestureDirection: CodingKeyRepresentable {
+    public var codingKey: any CodingKey { StringCodingKey(rawValue) }
+
+    public init?<T: CodingKey>(codingKey: T) {
+        self.init(rawValue: codingKey.stringValue)
+    }
+}
+
+// Same for `[ModifierKey: ModifierKeyAction]`.
+extension ModifierKey: CodingKeyRepresentable {
     public var codingKey: any CodingKey { StringCodingKey(rawValue) }
 
     public init?<T: CodingKey>(codingKey: T) {

@@ -141,7 +141,7 @@ private struct MenuBarContent: View {
             Text("No mice detected")
         } else {
             ForEach(registry.devices) { device in
-                Text(device.displayName)
+                DeviceMenuRow(device: device)
             }
         }
 
@@ -167,5 +167,19 @@ private struct MenuBarContent: View {
             NSApp.terminate(nil)
         }
         .keyboardShortcut("q", modifiers: .command)
+    }
+}
+
+/// One device line in the menu: name, and battery level when the device
+/// reports one over HID++ (0x1004).
+private struct DeviceMenuRow: View {
+    @ObservedObject var device: ManagedDevice
+
+    var body: some View {
+        if let battery = device.battery, let percentage = battery.percentage {
+            Text("\(device.displayName) — \(percentage)%\(battery.charging ? " ⚡" : "")")
+        } else {
+            Text(device.displayName)
+        }
     }
 }

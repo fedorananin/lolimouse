@@ -127,6 +127,29 @@ public final class DeviceRegistry: ObservableObject {
         scheduleScan(delay: 0)
     }
 
+    /// Re-reads every HID++ device's battery level.
+    ///
+    /// Called on a slow timer and after wake — the level changes over hours,
+    /// so anything more eager would just cost the mouse radio traffic. May be
+    /// called from any thread; the HID++ round trips happen on the scan queue
+    /// and the published values are updated back on the main thread.
+    public func refreshBatteries() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let candidates = devices.compactMap { device in
+                device.target.map { (device, $0) }
+            }
+            scanQueue.async {
+                for (device, target) in candidates {
+                    guard let battery = try? target.battery().get() else { continue }
+                    DispatchQueue.main.async {
+                        device.battery = battery
+                    }
+                }
+            }
+        }
+    }
+
     private func scheduleScan(delay: TimeInterval = 0.7) {
         scanWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.scan() }
@@ -168,6 +191,9 @@ public final class DeviceRegistry: ObservableObject {
                 )
                 device.senderIDs = Set(services.map(\.registryID))
                 device.capabilities = Self.probeCapabilities(descriptor.target)
+                // Safe to assign directly: the device is not published yet, so
+                // nothing is observing it from the main thread.
+                device.battery = try? descriptor.target.battery().get()
                 discovered.append(device)
             }
         }

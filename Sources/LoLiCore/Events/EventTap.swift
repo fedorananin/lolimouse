@@ -32,12 +32,19 @@ public final class EventTap {
     /// arrives hundreds of times a second and LoLiMouse has no use for it, so
     /// asking for it would be pure risk: the more traffic the tap carries, the
     /// more chances macOS has to decide we are too slow and switch it off.
-    private static let watchedEvents: [CGEventType] = [
+    public static let defaultWatchedEvents: [CGEventType] = [
         .scrollWheel,
         .otherMouseDown, .otherMouseUp,
     ]
 
-    public init(handler: @escaping Handler) {
+    /// The event types this tap asks for. Fixed at creation; the caller
+    /// replaces the tap to widen or narrow it, which keeps "what are we
+    /// listening to" a decision made in exactly one place.
+    public let watchedEvents: [CGEventType]
+
+    public init(watchedEvents: [CGEventType] = EventTap.defaultWatchedEvents,
+                handler: @escaping Handler) {
+        self.watchedEvents = watchedEvents
         self.handler = handler
     }
 
@@ -91,7 +98,7 @@ public final class EventTap {
     private func createTap() -> Bool {
         destroyTap()
 
-        let mask = Self.watchedEvents.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
+        let mask = watchedEvents.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         let context = Unmanaged.passUnretained(self).toOpaque()
 
         // `.cghidEventTap` is the earliest point in the pipeline, ahead of the

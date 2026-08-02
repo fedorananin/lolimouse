@@ -37,7 +37,8 @@ exist because of it:
 3. **The event tap is installed only while it has work to do.** An active tap at
    `kCGHIDEventTap` sits in front of every input event on the machine. With no
    scrolling or button settings switched on, no tap is installed at all, and the
-   tap only ever asks for the three event types it acts on.
+   tap only ever asks for the event types it acts on (`flagsChanged` is added to
+   the mask only while a pinch-zoom modifier action is configured).
 
 **Do not launch the app on a user's machine without asking first.** Verifying a
 change usually means `make test` plus reading the code. When a real run is
@@ -146,7 +147,7 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
 - Device discovery, hotplug, clean start and quit.
 - HID++ reaches the mouse: firmware name and unit ID read back over a direct
   (`0xFF`) connection.
-- 40 tests pass.
+- 61 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:
@@ -156,6 +157,12 @@ the two reference implementations, never exercised against a real device:
 - Button diversion (`0x1B04`), the wheel-mode button, thumb-button gestures
 - The scroll pipeline end to end, including detent normalisation
 - Reconnect reapplication
+- Modifier-key scroll actions (`ModifierKeyTransformer`): zoom keystrokes,
+  pinch-zoom gesture synthesis (private CGEvent fields 110/113/132), the
+  dynamic `flagsChanged` tap mask
+- Modifier-qualified button mappings (⌘+button → different action)
+- Media/brightness actions (NX system-defined key events)
+- Battery level in the menu bar
 
 Do not describe any of the above as working until it has been seen working.
 

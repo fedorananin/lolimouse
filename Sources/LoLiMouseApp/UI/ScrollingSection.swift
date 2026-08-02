@@ -26,6 +26,27 @@ struct ScrollingSection: View {
                 }
             }
 
+            SettingsSection(
+                title: "Modifier keys",
+                subtitle: "Change what the wheel does while a modifier key is held."
+            ) {
+                ManagedSetting(
+                    title: "Act on modifier keys while scrolling",
+                    help: "For example, hold ⌘ and scroll to zoom. The application never sees the "
+                        + "modifier itself, so its own shortcuts stay out of the way.",
+                    isManaged: model.enabled(\.scrolling.modifiers)
+                ) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(ModifierKey.allCases, id: \.self) { modifier in
+                            ModifierActionRow(
+                                modifier: modifier,
+                                actions: model.value(\.scrolling.modifiers)
+                            )
+                        }
+                    }
+                }
+            }
+
             AxisSettings(
                 title: "Vertical scrolling",
                 model: model,
@@ -38,6 +59,77 @@ struct ScrollingSection: View {
                 axis: \.scrolling.horizontal
             )
         }
+    }
+}
+
+/// One modifier's row: a picker over the possible actions, plus a speed
+/// slider when the chosen action is "change speed".
+private struct ModifierActionRow: View {
+    let modifier: ModifierKey
+    @Binding var actions: [ModifierKey: ModifierKeyAction]
+
+    /// The fixed menu entries. `changeSpeed` keeps its configured scale when
+    /// re-selected, so it is handled separately.
+    private static let simpleChoices: [ModifierKeyAction?] = [
+        nil, .ignore, .preventDefault, .alterOrientation,
+        .zoom, .zoomReversed, .pinchZoom, .pinchZoomReversed,
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker(modifier.displayName, selection: selection) {
+                ForEach(Array(Self.simpleChoices.enumerated()), id: \.offset) { _, choice in
+                    Text(choice?.displayName ?? "No change").tag(Selection(choice))
+                }
+                Text(ModifierKeyAction.changeSpeed(2).displayName).tag(Selection.changeSpeed)
+            }
+            .pickerStyle(.menu)
+
+            if case let .changeSpeed(scale) = actions[modifier] {
+                LabelledSlider(
+                    label: "Multiplier",
+                    value: Binding(
+                        get: { scale },
+                        set: { actions[modifier] = .changeSpeed($0) }
+                    ),
+                    range: 0.1 ... 10,
+                    step: 0.1
+                )
+                .padding(.leading, 16)
+            }
+        }
+    }
+
+    /// A hashable stand-in for "no action or one of the actions", because
+    /// `changeSpeed`'s payload must not fragment the menu into one entry per
+    /// slider position.
+    private enum Selection: Hashable {
+        case none
+        case simple(ModifierKeyAction)
+        case changeSpeed
+
+        init(_ action: ModifierKeyAction?) {
+            switch action {
+            case nil: self = .none
+            case .changeSpeed: self = .changeSpeed
+            case let .some(other): self = .simple(other)
+            }
+        }
+    }
+
+    private var selection: Binding<Selection> {
+        Binding(
+            get: { Selection(actions[modifier]) },
+            set: { newValue in
+                switch newValue {
+                case .none: actions[modifier] = nil
+                case let .simple(action): actions[modifier] = action
+                case .changeSpeed:
+                    if case .changeSpeed = actions[modifier] { break }
+                    actions[modifier] = .changeSpeed(2)
+                }
+            }
+        )
     }
 }
 

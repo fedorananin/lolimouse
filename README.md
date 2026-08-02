@@ -102,8 +102,20 @@ Event handling:
 - **Linear or accelerated scrolling**, per axis, with a fixed distance per click
   or an adjustable acceleration curve, plus a speed multiplier and direction
   reversal.
+- **Modifier keys while scrolling** — hold ⌘ (or ⇧, ⌥, ⌃) and the wheel does
+  something else: zoom via the application's own ⌘= / ⌘− shortcut, a smooth
+  trackpad-style pinch zoom, a different scrolling speed, swapped axes, or
+  nothing at all. The application never sees the modifier itself, so its own
+  shortcuts stay out of the way.
 - **Per-device pointer speed and acceleration**, including fully linear tracking.
-- **Button remapping** for ordinary mouse buttons.
+- **Button remapping** for ordinary mouse buttons, with optional modifier keys —
+  the same button can do one thing plain and another with ⌘ held.
+- **Media and hardware keys as actions** — volume, mute, play/pause, track
+  skipping and display brightness can all be bound to buttons and gestures.
+
+And the small things:
+
+- **Battery level** in the menu bar and in the settings window, over HID++.
 
 ## Where settings live
 
@@ -186,7 +198,8 @@ prevent that, and they are not negotiable:
 3. **The event tap is installed only while it has work to do.** An active tap at
    `kCGHIDEventTap` sits in front of every input event on the machine. With no
    scrolling or button settings switched on, LoLiMouse installs no tap at all,
-   and it asks for only the three event types it actually acts on.
+   and it asks for only the event types it actually acts on — three, plus
+   modifier-key changes only while a pinch-zoom action is configured.
 
 Teardown is bounded for the same reason: restoring settings at quit talks to a
 device that may be asleep, and hanging in `applicationWillTerminate` is how an

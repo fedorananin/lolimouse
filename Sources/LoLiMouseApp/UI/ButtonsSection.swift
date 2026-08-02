@@ -153,6 +153,15 @@ struct ButtonsSection: View {
                             .frame(width: 90, alignment: .leading)
                     }
 
+                    ModifierToggles(modifiers: Binding(
+                        get: { mapping.modifiers },
+                        set: { newValue in
+                            var updated = mappings.wrappedValue
+                            updated[index].modifiers = newValue
+                            mappings.wrappedValue = updated
+                        }
+                    ))
+
                     ActionPicker(label: "", action: Binding(
                         get: { mapping.action },
                         set: { newValue in
@@ -185,10 +194,35 @@ struct ButtonsSection: View {
             .buttonStyle(.borderless)
 
             Text("Left, right and the standard back and forward buttons are left alone on purpose — "
-                + "macOS already handles them correctly.")
+                + "macOS already handles them correctly. Tick a modifier to make the mapping fire "
+                + "only while that key is held; the same button can then do different things.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Compact ⌘⇧⌥⌃ toggles for one mapping's required modifiers.
+private struct ModifierToggles: View {
+    @Binding var modifiers: Set<ModifierKey>
+
+    private static let symbols: [(ModifierKey, String)] = [
+        (.control, "⌃"), (.option, "⌥"), (.shift, "⇧"), (.command, "⌘"),
+    ]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(Self.symbols, id: \.0) { modifier, symbol in
+                Toggle(symbol, isOn: Binding(
+                    get: { modifiers.contains(modifier) },
+                    set: { held in
+                        if held { modifiers.insert(modifier) } else { modifiers.remove(modifier) }
+                    }
+                ))
+                .toggleStyle(.button)
+                .help("Fire only while \(modifier.displayName) is held")
+            }
         }
     }
 }

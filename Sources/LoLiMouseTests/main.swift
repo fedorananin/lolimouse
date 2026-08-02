@@ -314,6 +314,264 @@ suite("Scroll processing") {
     }
 }
 
+// MARK: - Modifier keys
+
+func modifierScrollEvent(deltaY: Int32, flags: CGEventFlags) -> CGEvent {
+    let event = scrollEvent(deltaY: deltaY)
+    event.flags = flags
+    return event
+}
+
+suite("Modifier keys — what the wheel does while a modifier is held") {
+    test("an unconfigured modifier leaves the event and its flags alone") {
+        let transformer = ModifierKeyTransformer(actions: [.command: .zoom])
+        let event = modifierScrollEvent(deltaY: 1, flags: .maskShift)
+        guard let result = transformer.process(event, type: .scrollWheel) else {
+            expect(false, "the event was swallowed")
+            return
+        }
+        expect(result.flags.contains(.maskShift), "an unhandled flag must survive")
+        expectEqual(ScrollWheelEvent(result).deltaY, 1)
+    }
+
+    test("ignore strips the modifier so the app sees plain scrolling") {
+        let transformer = ModifierKeyTransformer(actions: [.command: .ignore])
+        let event = modifierScrollEvent(deltaY: 2, flags: .maskCommand)
+        guard let result = transformer.process(event, type: .scrollWheel) else {
+            expect(false, "the event was swallowed")
+            return
+        }
+        expect(!result.flags.contains(.maskCommand), "the handled flag must be removed")
+        expectEqual(ScrollWheelEvent(result).deltaY, 2, "the movement must be untouched")
+    }
+
+    test("preventDefault swallows the event") {
+        let transformer = ModifierKeyTransformer(actions: [.shift: .preventDefault])
+        expectNil(transformer.process(modifierScrollEvent(deltaY: 1, flags: .maskShift),
+                                      type: .scrollWheel))
+    }
+
+    test("alterOrientation swaps the axes") {
+        let transformer = ModifierKeyTransformer(actions: [.option: .alterOrientation])
+        let event = modifierScrollEvent(deltaY: 3, flags: .maskAlternate)
+        guard let result = transformer.process(event, type: .scrollWheel) else {
+            expect(false, "the event was swallowed")
+            return
+        }
+        let view = ScrollWheelEvent(result)
+        expectEqual(view.deltaY, 0)
+        expectEqual(view.deltaX, 3)
+    }
+
+    test("changeSpeed scales the movement and strips the flag") {
+        let transformer = ModifierKeyTransformer(actions: [.control: .changeSpeed(3)])
+        let event = modifierScrollEvent(deltaY: 2, flags: .maskControl)
+        guard let result = transformer.process(event, type: .scrollWheel) else {
+            expect(false, "the event was swallowed")
+            return
+        }
+        expectEqual(ScrollWheelEvent(result).deltaY, 6)
+        expect(!result.flags.contains(.maskControl))
+    }
+
+    test("zoom swallows the scroll and posts one shortcut in the scroll direction") {
+        var posted: [Int] = []
+        let transformer = ModifierKeyTransformer(
+            actions: [.command: .zoom],
+            postZoom: { posted.append($0) },
+            postPinch: { _, _ in expect(false, "zoom must not post gestures") }
+        )
+        expectNil(transformer.process(modifierScrollEvent(deltaY: 1, flags: .maskCommand),
+                                      type: .scrollWheel))
+        expectNil(transformer.process(modifierScrollEvent(deltaY: -1, flags: .maskCommand),
+                                      type: .scrollWheel))
+        expectEqual(posted, [1, -1])
+    }
+
+    test("zoomReversed flips the direction") {
+        var posted: [Int] = []
+        let transformer = ModifierKeyTransformer(
+            actions: [.command: .zoomReversed],
+            postZoom: { posted.append($0) },
+            postPinch: { _, _ in }
+        )
+        _ = transformer.process(modifierScrollEvent(deltaY: 1, flags: .maskCommand),
+                                type: .scrollWheel)
+        expectEqual(posted, [-1])
+    }
+
+    test("a pinch begins on the first scroll and ends when the flags change") {
+        var phases: [ModifierKeyTransformer.PinchPhase] = []
+        let transformer = ModifierKeyTransformer(
+            actions: [.command: .pinchZoom],
+            postZoom: { _ in expect(false, "pinch must not post keystrokes") },
+            postPinch: { phase, _ in phases.append(phase) }
+        )
+
+        expectNil(transformer.process(modifierScrollEvent(deltaY: 1, flags: .maskCommand),
+                                      type: .scrollWheel))
+        expectNil(transformer.process(modifierScrollEvent(deltaY: 1, flags: .maskCommand),
+                                      type: .scrollWheel),
+                  "scrolling during a pinch must keep feeding the gesture")
+
+        guard let flagsChanged = CGEvent(source: nil) else {
+            expect(false, "could not create an event")
+            return
+        }
+        _ = transformer.process(flagsChanged, type: .flagsChanged)
+
+        expectEqual(phases.first == .began, true, "the gesture must begin exactly once")
+        expectEqual(phases.last == .ended, true, "releasing the modifier must end the gesture")
+        expectEqual(phases.filter { $0 == .began }.count, 1)
+        expectEqual(phases.filter { $0 == .ended }.count, 1)
+    }
+
+    test("deactivating mid-pinch ends the gesture") {
+        var phases: [ModifierKeyTransformer.PinchPhase] = []
+        let transformer = ModifierKeyTransformer(
+            actions: [.command: .pinchZoom],
+            postZoom: { _ in },
+            postPinch: { phase, _ in phases.append(phase) }
+        )
+        _ = transformer.process(modifierScrollEvent(deltaY: 1, flags: .maskCommand),
+                                type: .scrollWheel)
+        transformer.deactivate()
+        expectEqual(phases.last == .ended, true,
+                    "tearing the tap down must never strand a began gesture")
+        transformer.deactivate()
+        expectEqual(phases.filter { $0 == .ended }.count, 1, "a second deactivate must be a no-op")
+    }
+
+    test("two held modifiers each get their action") {
+        var posted: [Int] = []
+        let transformer = ModifierKeyTransformer(
+            actions: [.shift: .changeSpeed(2), .command: .zoom],
+            postZoom: { posted.append($0) },
+            postPinch: { _, _ in }
+        )
+        // ⌘⇧+scroll: shift doubles the movement, command turns it into zoom.
+        expectNil(transformer.process(
+            modifierScrollEvent(deltaY: 1, flags: [.maskCommand, .maskShift]),
+            type: .scrollWheel
+        ))
+        expectEqual(posted, [1])
+    }
+
+    test("modifier actions round-trip through JSON") {
+        var settings = ScrollingSettings()
+        settings.modifiers = .on([.command: .pinchZoom, .shift: .changeSpeed(2.5)])
+        guard let data = try? JSONEncoder().encode(settings),
+              let decoded = try? JSONDecoder().decode(ScrollingSettings.self, from: data)
+        else {
+            expect(false, "round trip failed")
+            return
+        }
+        expectEqual(decoded, settings)
+    }
+
+    test("only pinch actions ask for flagsChanged") {
+        var settings = ScrollingSettings()
+        expectEqual(settings.wantsFlagsChanged, false)
+
+        settings.modifiers = .on([.command: .zoom])
+        expectEqual(settings.wantsFlagsChanged, false,
+                    "keystroke zoom must not widen the event tap")
+
+        settings.modifiers = .on([.command: .pinchZoom])
+        expectEqual(settings.wantsFlagsChanged, true)
+
+        settings.modifiers.enabled = false
+        expectEqual(settings.wantsFlagsChanged, false,
+                    "a switched-off setting must not widen the event tap")
+    }
+
+    test("configuring modifiers switches the scrolling pipeline on") {
+        var settings = ScrollingSettings()
+        expectEqual(settings.managesAnything, false)
+        settings.modifiers.enabled = true
+        expectEqual(settings.managesAnything, true)
+    }
+}
+
+// MARK: - Button mappings with modifiers
+
+suite("Button mappings — modifiers make one button several") {
+    let plain = ButtonMapping(button: 3, action: .back)
+    let withCommand = ButtonMapping(button: 3, modifiers: [.command], action: .missionControl)
+    let withBoth = ButtonMapping(button: 3, modifiers: [.command, .shift], action: .showDesktop)
+
+    test("with no modifiers held, the plain mapping fires") {
+        let best = ButtonMapping.bestMatch(in: [plain, withCommand], button: 3, held: [])
+        expectEqual(best?.action, .back)
+    }
+
+    test("the most specific matching mapping wins") {
+        let mappings = [plain, withCommand, withBoth]
+        expectEqual(ButtonMapping.bestMatch(in: mappings, button: 3, held: [.command])?.action,
+                    .missionControl)
+        expectEqual(ButtonMapping.bestMatch(in: mappings, button: 3, held: [.command, .shift])?.action,
+                    .showDesktop)
+    }
+
+    test("a mapping never fires without its required modifiers") {
+        expectNil(ButtonMapping.bestMatch(in: [withCommand], button: 3, held: [.shift]))
+        expectNil(ButtonMapping.bestMatch(in: [withCommand], button: 3, held: []))
+    }
+
+    test("extra held modifiers do not disqualify a mapping") {
+        // ⌥ held on top of ⌘ still means "⌘ is held"; requiring an exact match
+        // would make mappings feel randomly unreliable.
+        expectEqual(ButtonMapping.bestMatch(in: [withCommand], button: 3,
+                                            held: [.command, .option])?.action,
+                    .missionControl)
+    }
+
+    test("the wrong button never matches") {
+        expectNil(ButtonMapping.bestMatch(in: [plain], button: 4, held: []))
+    }
+
+    test("a pre-modifier config file still decodes") {
+        let json = Data("""
+        {"id": "00000000-0000-0000-0000-000000000000", "button": 3,
+         "action": {"back": {}}}
+        """.utf8)
+        guard let mapping = try? JSONDecoder().decode(ButtonMapping.self, from: json) else {
+            expect(false, "decoding failed")
+            return
+        }
+        expectEqual(mapping.modifiers, [])
+    }
+}
+
+// MARK: - Media actions
+
+suite("Media actions") {
+    test("the system-key codes match IOKit's ev_keymap.h") {
+        // These are transcribed by hand; a wrong one silently presses the
+        // wrong media key.
+        expectEqual(ActionRunner.SystemKey.soundUp.rawValue, 0)
+        expectEqual(ActionRunner.SystemKey.soundDown.rawValue, 1)
+        expectEqual(ActionRunner.SystemKey.brightnessUp.rawValue, 2)
+        expectEqual(ActionRunner.SystemKey.brightnessDown.rawValue, 3)
+        expectEqual(ActionRunner.SystemKey.mute.rawValue, 7)
+        expectEqual(ActionRunner.SystemKey.play.rawValue, 16)
+        expectEqual(ActionRunner.SystemKey.next.rawValue, 17)
+        expectEqual(ActionRunner.SystemKey.previous.rawValue, 18)
+    }
+
+    test("media actions round-trip through JSON") {
+        let mapping = ButtonMapping(button: 4, modifiers: [.option], action: .volumeUp)
+        guard let data = try? JSONEncoder().encode(mapping),
+              let decoded = try? JSONDecoder().decode(ButtonMapping.self, from: data)
+        else {
+            expect(false, "round trip failed")
+            return
+        }
+        expectEqual(decoded.action, .volumeUp)
+        expectEqual(decoded.modifiers, [.option])
+    }
+}
+
 // MARK: - Event thread
 
 suite("Event thread") {
