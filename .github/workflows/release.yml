@@ -1,0 +1,43 @@
+# Builds a release whenever a version tag is pushed:
+#
+#   git tag v0.1.0
+#   git push origin v0.1.0
+#
+# The tag becomes the version stamped into the app bundle, and the resulting
+# zip is attached to a GitHub release created for the tag. The binary is
+# universal (Apple Silicon + Intel) and ad-hoc signed — see the README for what
+# that means for Gatekeeper on first launch.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: make test
+
+      - name: Build the app bundle
+        run: make release-zip UNIVERSAL=1 VERSION="${GITHUB_REF_NAME#v}"
+
+      - name: Rename the artifact after the tag
+        run: mv build/LoLiMouse.zip "build/LoLiMouse-${GITHUB_REF_NAME}.zip"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "LoLiMouse $GITHUB_REF_NAME" \
+            --generate-notes \
+            "build/LoLiMouse-${GITHUB_REF_NAME}.zip"

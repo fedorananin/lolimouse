@@ -1,0 +1,7 @@
+.build/
+build/
+.swiftpm/
+.DS_Store
+*.xcuserdatad
+Package.resolved
+.signing.mk
