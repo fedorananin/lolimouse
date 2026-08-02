@@ -36,6 +36,11 @@ only exists while the settings window is open). Click the mouse icon in the
 menu bar and choose **Settings…** to configure it, and tick **Start at login**
 there if you want it running permanently.
 
+Prefer an empty menu bar? Untick **Show in menu bar** in the settings window —
+or hide the icon from System Settings → Menu Bar, or ⌘-drag it off. LoLiMouse
+keeps running invisibly either way; open it again from the Applications folder
+(or Spotlight) whenever you want the settings window back.
+
 ### Permissions
 
 LoLiMouse asks for exactly two, and needs no kernel extension, driver, or
@@ -116,6 +121,10 @@ Event handling:
 And the small things:
 
 - **Battery level** in the menu bar and in the settings window, over HID++.
+- **A hideable menu bar icon** — untick "Show in menu bar" and LoLiMouse keeps
+  working with no visible presence at all. Hiding it from System Settings or by
+  ⌘-dragging it off does the same thing, never quits the app, and stays in sync
+  with the checkbox.
 
 ## Where settings live
 
@@ -213,7 +222,7 @@ app gets killed halfway through cleanup.
 | `HIDKit` | Device discovery through `IOHIDManager`, synchronous HID report transactions, and per-device pointer tuning via `IOHIDServiceClient`. |
 | `HIDPP` | The Logitech HID++ 1.0 / 2.0 stack: framing, feature resolution, receiver slots, and typed wrappers for the features used here. |
 | `LoLiCore` | Configuration, the device registry, the hardware reconciler, and the CGEvent pipeline. |
-| `LoLiMouseApp` | The SwiftUI application. |
+| `LoLiMouseApp` | The application: an AppKit lifecycle (deliberately — SwiftUI scenes tie the app's lifetime to its windows and menu bar icon) hosting SwiftUI views. |
 
 Two pieces are worth reading if you want to understand the design:
 

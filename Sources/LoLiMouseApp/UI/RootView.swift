@@ -18,12 +18,19 @@ struct RootView: View {
         case about
     }
 
+    // A hand-rolled sidebar rather than `NavigationSplitView`. On macOS 26 a
+    // `NavigationSplitView` inside an AppKit-hosted window re-lays itself out
+    // at its *ideal* height (taller than the screen) on every hierarchy
+    // update — devices arriving, battery refreshing — leaving the visible
+    // window showing an empty mid-slice of the interface. A plain HStack has
+    // no such machinery to go wrong.
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             sidebar
-                .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 300)
-        } detail: {
+                .frame(width: 230)
+            Divider()
             detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear(perform: selectSomething)
         .onChange(of: registry.devices.count) { _ in selectSomething() }
@@ -51,6 +58,7 @@ struct RootView: View {
                     .tag(SidebarItem.about)
             }
         }
+        .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("LoLiMouse enabled", isOn: Binding(
@@ -64,6 +72,19 @@ struct RootView: View {
                     set: { newValue in loginItem.setEnabled(newValue) }
                 ))
                 .toggleStyle(.checkbox)
+
+                Toggle("Show in menu bar", isOn: Binding(
+                    get: { store.configuration.showMenuBarIcon },
+                    set: { newValue in store.update { $0.showMenuBarIcon = newValue } }
+                ))
+                .toggleStyle(.checkbox)
+
+                if !store.configuration.showMenuBarIcon {
+                    Text("LoLiMouse keeps running without the icon. Open it again from the Applications folder to get back here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if let error = loginItem.lastError {
                     Text(error)

@@ -102,7 +102,7 @@ trust settings is unnecessary.
 | `HIDKit` | `IOHIDManager` discovery, synchronous HID report transactions, per-device pointer tuning via `IOHIDServiceClient`. |
 | `HIDPP` | Logitech HID++ 1.0/2.0: framing, feature resolution, receiver slots, typed feature wrappers. |
 | `LoLiCore` | Configuration, device registry, hardware reconciler, CGEvent pipeline. |
-| `LoLiMouseApp` | SwiftUI app. |
+| `LoLiMouseApp` | AppKit lifecycle (`@main` app delegate, own `NSStatusItem`, `NSHostingController`-hosted SwiftUI views). Not a SwiftUI `App` on purpose: a `MenuBarExtra` scene terminates the app when its icon is hidden, and a suppressed `Window` scene cannot be opened from AppKit at all. Do not reintroduce SwiftUI scenes. |
 | `LoLiMouseTests` | Executable test suite. |
 
 ### The two ideas the project is built around

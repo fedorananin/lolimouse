@@ -514,15 +514,34 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Master switch. Turning it off stops the event tap and restores every
     /// hardware setting LoLiMouse changed, without losing the configuration.
     public var enabled: Bool
+    /// Whether the menu bar shows the LoLiMouse item. A plain bool rather than
+    /// a `Setting` because it changes nothing outside the app itself — there is
+    /// no external state to baseline or restore. With the icon hidden the app
+    /// keeps running; relaunching it from the Applications folder brings the
+    /// settings window up.
+    public var showMenuBarIcon: Bool
 
     public init(
         schemaVersion: Int = Configuration.currentSchemaVersion,
         devices: [String: DeviceConfiguration] = [:],
-        enabled: Bool = true
+        enabled: Bool = true,
+        showMenuBarIcon: Bool = true
     ) {
         self.schemaVersion = schemaVersion
         self.devices = devices
         self.enabled = enabled
+        self.showMenuBarIcon = showMenuBarIcon
+    }
+
+    // Decoding fills in defaults for missing keys so config files written by
+    // older versions keep working instead of being shunted to `.broken`.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+            ?? Configuration.currentSchemaVersion
+        devices = try container.decodeIfPresent([String: DeviceConfiguration].self, forKey: .devices) ?? [:]
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
     }
 
     public func device(_ key: String) -> DeviceConfiguration {

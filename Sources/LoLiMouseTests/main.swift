@@ -93,6 +93,18 @@ suite("Configuration") {
         expectEqual(decoded.device("unit:DEADBEEF").buttons.thumbButton.gestures.value[.up], .missionControl)
     }
 
+    test("a config file from before the menu bar toggle still decodes") {
+        // Root-level fields are filled in with defaults when absent, so adding
+        // one must never send an old config.json to `.broken`.
+        let json = Data(#"{"schemaVersion": 1, "devices": {}, "enabled": false}"#.utf8)
+        guard let decoded = try? JSONDecoder().decode(Configuration.self, from: json) else {
+            expect(false, "decoding failed")
+            return
+        }
+        expectEqual(decoded.enabled, false)
+        expectEqual(decoded.showMenuBarIcon, true)
+    }
+
     test("DPI presets cycle and wrap around") {
         let presets = DPIPresets(values: [800, 1600, 3200], activeIndex: 0)
         expectEqual(presets.active, 800)
