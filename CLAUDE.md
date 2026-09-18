@@ -69,7 +69,7 @@ Anything that runs on a real thread or touches IOKit lifecycle gets a test in
 
 ```sh
 make build      # compile
-make test       # run the suite (also: swift run LoLiMouseTests)
+make test       # run the suite
 make bundle     # assemble build/LoLiMouse.app
 make install    # bundle + copy to /Applications
 make uninstall  # remove the app, keep settings

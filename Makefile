@@ -13,7 +13,14 @@
 APP_NAME     := LoLiMouse
 BUNDLE_ID    := me.fedorananin.LoLiMouse
 CONFIG       := release
-BUILD_DIR    := .build/$(CONFIG)
+
+# SwiftPM's scratch directory (object files, module caches, indexes) is kept
+# outside the source tree. The project lives inside a cloud-synced folder, and
+# a build produces thousands of files that the sync client would otherwise
+# upload after every compile. Override with `make SCRATCH=/some/where`.
+SCRATCH      ?= $(HOME)/Library/Caches/$(APP_NAME)/build
+SWIFT_FLAGS  := --scratch-path "$(SCRATCH)"
+BUILD_DIR    := $(SCRATCH)/$(CONFIG)
 BUNDLE       := build/$(APP_NAME).app
 CONTENTS     := $(BUNDLE)/Contents
 INSTALL_DIR  := /Applications
@@ -27,7 +34,7 @@ VERSION      ?=
 # a local `make install` builds the host architecture only, which is faster.
 ifeq ($(UNIVERSAL),1)
 BUILD_FLAGS  := --arch arm64 --arch x86_64
-BUILD_DIR    := .build/apple/Products/Release
+BUILD_DIR    := $(SCRATCH)/apple/Products/Release
 endif
 
 # Signing identity: a name, or a SHA-1 fingerprint.
@@ -45,7 +52,7 @@ SIGN_IDENTITY ?= $(LOLIMOUSE_SIGN_IDENTITY)
 all: bundle
 
 build:
-	swift build -c $(CONFIG) $(BUILD_FLAGS)
+	swift build $(SWIFT_FLAGS) -c $(CONFIG) $(BUILD_FLAGS)
 
 bundle: build icon
 	@rm -rf "$(BUNDLE)"
@@ -98,10 +105,10 @@ run: bundle
 	@open "$(BUNDLE)"
 
 test:
-	swift run LoLiMouseTests
+	swift run $(SWIFT_FLAGS) LoLiMouseTests
 
 clean:
-	swift package clean
+	swift package $(SWIFT_FLAGS) clean
 	rm -rf build
 
 signing-help:
