@@ -149,7 +149,7 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
   (`0xFF`) connection.
 - Battery level (`0x1004` / `0x1000`) read back and shown in the menu and next
   to the menu bar icon.
-- 64 tests pass.
+- 66 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:

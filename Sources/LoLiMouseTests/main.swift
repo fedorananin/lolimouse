@@ -644,6 +644,45 @@ suite("Event thread") {
     }
 }
 
+// MARK: - Reconciler
+
+suite("Reconciler — nothing is written while the Mac sleeps") {
+    // DarkWake: a sleeping Mac surfaces briefly on its own, and HID traffic in
+    // that window can promote it to a full wake. The gate is cheap; the test
+    // pins it because forgetting it costs a Mac that wakes itself at night.
+    func detachedDevice() -> ManagedDevice {
+        ManagedDevice(key: "unit:TEST", displayName: "Test mouse",
+                      target: nil, endpoint: nil, pointerService: nil)
+    }
+
+    test("a suspended reconciler drops the request instead of touching the device") {
+        let reconciler = HardwareReconciler()
+        let device = detachedDevice()
+        reconciler.suspend()
+        expectEqual(reconciler.isSuspended, true)
+
+        reconciler.reconcile(device: device, configuration: DeviceConfiguration(),
+                             globallyEnabled: true, confirm: true, reason: "test")
+        // Statuses are published on the main queue, so pump it.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+        expectNil(reconciler.statuses[device.key],
+                  "no status must be published: no work was queued")
+    }
+
+    test("resume opens the gate again") {
+        let reconciler = HardwareReconciler()
+        reconciler.suspend()
+        reconciler.resume()
+        expectEqual(reconciler.isSuspended, false)
+
+        let device = detachedDevice()
+        reconciler.reconcile(device: device, configuration: DeviceConfiguration(),
+                             globallyEnabled: true, reason: "test")
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        expect(reconciler.statuses[device.key] != nil, "after resume the request is processed")
+    }
+}
+
 // MARK: - HID++ protocol
 
 suite("HID++ protocol") {

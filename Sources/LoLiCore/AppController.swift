@@ -84,21 +84,45 @@ public final class AppController: ObservableObject {
             self?.refreshPermissions()
         }
 
-        // Battery drains over hours; ten minutes keeps the reading honest
-        // without waking the mouse's radio for nothing.
-        batteryTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
-            self?.registry.refreshBatteries()
-        }
+        startBatteryTimer()
 
-        NSWorkspace.shared.notificationCenter.addObserver(
+        // A sleeping Mac still wakes briefly on its own (DarkWake) and any HID
+        // request we make then can turn that into a full wake. So the battery
+        // poll and the reconciler are both parked until the real wake. Learned
+        // from OpenLogi, which hit exactly this.
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            os_log("going to sleep; pausing HID traffic", log: Self.log, type: .info)
+            batteryTimer?.invalidate()
+            batteryTimer = nil
+            reconciler.suspend()
+        }
+        workspace.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            guard let self else { return }
             // Waking from sleep is the single most reliable way to lose every
             // volatile hardware setting at once.
             os_log("woke from sleep; reapplying everything", log: Self.log, type: .info)
-            self?.reconcileAll(confirm: true, reason: "system wake")
+            reconciler.resume()
+            reconcileAll(confirm: true, reason: "system wake")
+            registry.refreshBatteries()
+            startBatteryTimer()
+        }
+    }
+
+    /// Battery drains over hours; ten minutes keeps the reading honest without
+    /// waking the mouse's radio for nothing.
+    private func startBatteryTimer() {
+        batteryTimer?.invalidate()
+        batteryTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
             self?.registry.refreshBatteries()
         }
     }
@@ -113,6 +137,8 @@ public final class AppController: ObservableObject {
         batteryTimer = nil
         removeEventTap()
         router.detachAll()
+        // Quitting while asleep is rare but must still put the mouse back.
+        reconciler.resume()
         reconciler.restoreAll(devices: registry.devices)
         registry.stop()
         store.flush()

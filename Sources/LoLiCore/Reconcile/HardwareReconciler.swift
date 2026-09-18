@@ -44,6 +44,12 @@ public final class HardwareReconciler: ObservableObject {
     private var baselines: [String: Baseline] = [:]
     private var pendingRetries: [String: DispatchWorkItem] = [:]
     private var attemptCounts: [String: Int] = [:]
+    /// Set between the system's will-sleep and did-wake notifications. While
+    /// the Mac is asleep it still surfaces periodically (DarkWake, for mail
+    /// and backups), and any HID traffic we send in that window can promote
+    /// the DarkWake into a full wake — lit screen, fans, the lot. So nothing
+    /// is written while suspended; the wake handler reapplies everything.
+    private var suspended = false
 
     /// Backoff schedule. The device is usually simply asleep, so the early
     /// retries are quick and the later ones back off to avoid waking it
@@ -80,6 +86,11 @@ public final class HardwareReconciler: ObservableObject {
         reason: String
     ) {
         cancelRetry(for: device.key)
+        guard !isSuspended else {
+            os_log("asleep; %{public}@ (%{public}@) deferred until wake",
+                   log: Self.log, type: .info, device.displayName, reason)
+            return
+        }
         setStatus(.applying, for: device.key)
 
         queue.async { [weak self] in
@@ -113,6 +124,32 @@ public final class HardwareReconciler: ObservableObject {
                 setStatus(.failed(message), for: device.key)
             }
         }
+    }
+
+    /// Stops all writes until `resume()`. Pending retries and confirmations
+    /// are dropped rather than parked: the wake handler reconciles every
+    /// device from scratch, so nothing is lost.
+    public func suspend() {
+        stateLock.lock()
+        suspended = true
+        let pending = pendingRetries
+        pendingRetries.removeAll()
+        stateLock.unlock()
+        pending.values.forEach { $0.cancel() }
+        os_log("suspended for sleep, %{public}d pending write(s) dropped",
+               log: Self.log, type: .info, pending.count)
+    }
+
+    public func resume() {
+        stateLock.lock()
+        suspended = false
+        stateLock.unlock()
+    }
+
+    public var isSuspended: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return suspended
     }
 
     /// Restores everything LoLiMouse ever wrote to these devices and forgets the
@@ -532,7 +569,7 @@ public final class HardwareReconciler: ObservableObject {
         globallyEnabled: Bool
     ) {
         let item = DispatchWorkItem { [weak self] in
-            guard let self else { return }
+            guard let self, !isSuspended else { return }
             os_log("confirming settings on %{public}@", log: Self.log, type: .info, device.displayName)
             _ = apply(device: device, configuration: configuration, globallyEnabled: globallyEnabled)
         }

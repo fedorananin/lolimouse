@@ -61,7 +61,9 @@ public final class ManagedDevice: Identifiable, ObservableObject {
 
     public var id: String { key }
 
-    init(
+    /// `package` so the test target can build a detached device (no target,
+    /// no endpoint) without opening anything.
+    package init(
         key: String,
         displayName: String,
         target: HIDPPTarget?,
