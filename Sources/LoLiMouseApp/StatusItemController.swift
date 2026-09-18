@@ -23,6 +23,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var visibilityObservation: NSKeyValueObservation?
     private var cancellables: Set<AnyCancellable> = []
+    /// One subscription per device, because `battery` is published on
+    /// `ManagedDevice` rather than on the registry.
+    private var batteryObservations: [String: AnyCancellable] = [:]
 
     init(controller: AppController, openSettings: @escaping () -> Void) {
         self.controller = controller
@@ -33,6 +36,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         store.$configuration
             .receive(on: DispatchQueue.main)
             .sink { [weak self] configuration in self?.apply(configuration) }
+            .store(in: &cancellables)
+
+        controller.registry.$devices
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] devices in self?.observeBatteries(devices) }
             .store(in: &cancellables)
     }
 
@@ -45,13 +53,52 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 systemSymbolName: configuration.enabled ? "computermouse.fill" : "computermouse",
                 accessibilityDescription: "LoLiMouse"
             )
+            updateBatteryTitle()
         } else if let item = statusItem, item.isVisible {
             item.isVisible = false
         }
     }
 
+    // MARK: - Battery
+
+    /// Keeps one battery subscription alive per device. Devices that have gone
+    /// away drop theirs; new ones get one when they are published.
+    private func observeBatteries(_ devices: [ManagedDevice]) {
+        let keys = Set(devices.map(\.key))
+        for key in batteryObservations.keys.filter({ !keys.contains($0) }) {
+            batteryObservations.removeValue(forKey: key)
+        }
+        for device in devices where batteryObservations[device.key] == nil {
+            batteryObservations[device.key] = device.$battery
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.updateBatteryTitle() }
+        }
+        updateBatteryTitle()
+    }
+
+    /// The mouse whose charge is shown after the icon: the first one that has
+    /// actually reported a level. Mice without HID++ never will, and a mouse
+    /// that has not answered yet should not blank out one that has.
+    private var batterySource: ManagedDevice? {
+        controller.registry.devices.first { $0.battery?.percentage != nil }
+    }
+
+    private func updateBatteryTitle() {
+        guard let button = statusItem?.button else { return }
+        guard let battery = batterySource?.battery, let percentage = battery.percentage else {
+            button.title = ""
+            return
+        }
+        button.title = "\(percentage)%\(battery.charging ? "⚡" : "")"
+    }
+
     private func makeStatusItem() -> NSStatusItem {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // Variable length so the reading can sit next to the icon. With a
+        // square item the title would be clipped away entirely.
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // AppKit's default for a status button puts the title first; the
+        // reading belongs after the mouse.
+        item.button?.imagePosition = .imageLeading
         // `removalAllowed` lets the user ⌘-drag the item off the bar. What must
         // never be set here is `terminationOnRemoval` — removing the icon has
         // to hide the icon, not kill the app.
