@@ -76,20 +76,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         updateBatteryTitle()
     }
 
-    /// The mouse whose charge is shown after the icon: the first one that has
-    /// actually reported a level. Mice without HID++ never will, and a mouse
-    /// that has not answered yet should not blank out one that has.
-    private var batterySource: ManagedDevice? {
-        controller.registry.devices.first { $0.battery?.percentage != nil }
-    }
-
+    /// Which devices are shown is the user's call, one checkbox per device in
+    /// its settings page; see `MenuBarBattery` for the formatting rules.
     private func updateBatteryTitle() {
         guard let button = statusItem?.button else { return }
-        guard let battery = batterySource?.battery, let percentage = battery.percentage else {
-            button.title = ""
-            return
-        }
-        button.title = "\(percentage)%\(battery.charging ? "⚡" : "")"
+        let configuration = store.configuration
+        button.title = MenuBarBattery.title(for: controller.registry.devices.map { device in
+            (shown: configuration.device(device.key).showBatteryInMenuBar, battery: device.battery)
+        })
     }
 
     private func makeStatusItem() -> NSStatusItem {
@@ -163,10 +157,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func label(for device: ManagedDevice) -> String {
-        guard let battery = device.battery, let percentage = battery.percentage else {
+        guard let battery = device.battery, let charge = MenuBarBattery.label(for: battery) else {
             return device.displayName
         }
-        return "\(device.displayName) — \(percentage)%\(battery.charging ? " ⚡" : "")"
+        return "\(device.displayName) — \(charge)"
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {

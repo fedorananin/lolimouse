@@ -120,7 +120,9 @@ Event handling:
 
 And the small things:
 
-- **Battery level** in the menu bar and in the settings window, over HID++.
+- **Battery level** in the menu and in the settings window, over HID++. Each
+  device has a "Show charge in menu bar" checkbox; the ones you tick are shown
+  next to the icon, so with a mouse and a keyboard you choose which to see.
 - **A hideable menu bar icon** — untick "Show in menu bar" and LoLiMouse keeps
   working with no visible presence at all. Hiding it from System Settings or by
   ⌘-dragging it off does the same thing, never quits the app, and stays in sync

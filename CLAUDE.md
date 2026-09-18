@@ -147,7 +147,9 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
 - Device discovery, hotplug, clean start and quit.
 - HID++ reaches the mouse: firmware name and unit ID read back over a direct
   (`0xFF`) connection.
-- 61 tests pass.
+- Battery level (`0x1004` / `0x1000`) read back and shown in the menu and next
+  to the menu bar icon.
+- 64 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:
@@ -162,7 +164,6 @@ the two reference implementations, never exercised against a real device:
   dynamic `flagsChanged` tap mask
 - Modifier-qualified button mappings (⌘+button → different action)
 - Media/brightness actions (NX system-defined key events)
-- Battery level in the menu bar
 
 Do not describe any of the above as working until it has been seen working.
 

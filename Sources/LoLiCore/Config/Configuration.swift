@@ -481,19 +481,39 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
     public var pointer: PointerSettings
     public var scrolling: ScrollingSettings
     public var buttons: ButtonSettings
+    /// Whether this device's charge is written next to the menu bar icon. A
+    /// plain bool like `showMenuBarIcon`: it changes nothing outside the app,
+    /// so there is nothing to baseline or restore. Per device rather than
+    /// global so that with a mouse and a keyboard the user decides which one
+    /// (or both) the menu bar reports.
+    public var showBatteryInMenuBar: Bool
 
     public init(
         displayName: String? = nil,
         hardware: HardwareSettings = HardwareSettings(),
         pointer: PointerSettings = PointerSettings(),
         scrolling: ScrollingSettings = ScrollingSettings(),
-        buttons: ButtonSettings = ButtonSettings()
+        buttons: ButtonSettings = ButtonSettings(),
+        showBatteryInMenuBar: Bool = false
     ) {
         self.displayName = displayName
         self.hardware = hardware
         self.pointer = pointer
         self.scrolling = scrolling
         self.buttons = buttons
+        self.showBatteryInMenuBar = showBatteryInMenuBar
+    }
+
+    // Fields added after 0.2.1 are optional on the wire so a config.json
+    // written by an older version keeps decoding.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        hardware = try container.decodeIfPresent(HardwareSettings.self, forKey: .hardware) ?? HardwareSettings()
+        pointer = try container.decodeIfPresent(PointerSettings.self, forKey: .pointer) ?? PointerSettings()
+        scrolling = try container.decodeIfPresent(ScrollingSettings.self, forKey: .scrolling) ?? ScrollingSettings()
+        buttons = try container.decodeIfPresent(ButtonSettings.self, forKey: .buttons) ?? ButtonSettings()
+        showBatteryInMenuBar = try container.decodeIfPresent(Bool.self, forKey: .showBatteryInMenuBar) ?? false
     }
 
     public var managesAnything: Bool {

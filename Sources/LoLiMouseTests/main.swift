@@ -105,6 +105,38 @@ suite("Configuration") {
         expectEqual(decoded.showMenuBarIcon, true)
     }
 
+    test("a device entry from before the menu bar battery checkbox still decodes") {
+        // Same rule one level down: a new per-device field must default, not
+        // reject the file.
+        let json = Data(#"{"schemaVersion": 1, "devices": {"unit:1": {"displayName": "MX Master 3S"}}, "enabled": true}"#.utf8)
+        guard let decoded = try? JSONDecoder().decode(Configuration.self, from: json) else {
+            expect(false, "decoding failed")
+            return
+        }
+        expectEqual(decoded.device("unit:1").displayName, "MX Master 3S")
+        expectEqual(decoded.device("unit:1").showBatteryInMenuBar, false)
+    }
+
+    test("the menu bar shows only opted-in devices that have reported a charge") {
+        let mouse = HIDPPBattery(percentage: 60, charging: false)
+        let keyboard = HIDPPBattery(percentage: 85, charging: true)
+        let unknown = HIDPPBattery(percentage: nil, charging: false)
+
+        expectEqual(MenuBarBattery.title(for: []), "")
+        expectEqual(MenuBarBattery.title(for: [(shown: false, battery: mouse)]), "",
+                    "nothing is shown until the user ticks a device")
+        expectEqual(MenuBarBattery.title(for: [(shown: true, battery: mouse)]), "60%")
+        expectEqual(MenuBarBattery.title(for: [(shown: true, battery: keyboard)]), "85% ⚡")
+        expectEqual(MenuBarBattery.title(for: [(shown: true, battery: nil), (shown: true, battery: mouse)]), "60%",
+                    "a device that has not answered yet must not blank out one that has")
+        expectEqual(MenuBarBattery.title(for: [(shown: true, battery: unknown), (shown: true, battery: mouse)]), "60%")
+        expectEqual(
+            MenuBarBattery.title(for: [(shown: true, battery: keyboard), (shown: false, battery: unknown), (shown: true, battery: mouse)]),
+            "85% ⚡ · 60%",
+            "several devices keep their display order"
+        )
+    }
+
     test("DPI presets cycle and wrap around") {
         let presets = DPIPresets(values: [800, 1600, 3200], activeIndex: 0)
         expectEqual(presets.active, 800)

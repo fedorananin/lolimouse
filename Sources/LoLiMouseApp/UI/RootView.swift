@@ -216,6 +216,7 @@ struct DeviceDetailView: View {
                     : "Generic pointing device — scrolling and buttons only")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                batteryToggle
             }
             Spacer()
             batteryBadge
@@ -230,6 +231,20 @@ struct DeviceDetailView: View {
             Label("\(percentage)%", systemImage: batteryIcon(percentage, charging: battery.charging))
                 .foregroundStyle(percentage <= 10 && !battery.charging ? Color.orange : Color.secondary)
                 .help(battery.charging ? "Charging" : "Battery level")
+        }
+    }
+
+    /// Offered only once the device has reported a charge — a device without
+    /// a battery, or one that never answers, has nothing to show.
+    @ViewBuilder
+    private var batteryToggle: some View {
+        if device.battery?.percentage != nil {
+            Toggle("Show charge in menu bar", isOn: Binding(
+                get: { store.configuration.device(device.key).showBatteryInMenuBar },
+                set: { newValue in store.update { $0.update(device.key) { $0.showBatteryInMenuBar = newValue } } }
+            ))
+            .toggleStyle(.checkbox)
+            .padding(.top, 6)
         }
     }
 

@@ -86,6 +86,11 @@ public extension HIDPPTarget {
 public struct HIDPPBattery: Equatable {
     public let percentage: Int?
     public let charging: Bool
+
+    public init(percentage: Int?, charging: Bool) {
+        self.percentage = percentage
+        self.charging = charging
+    }
 }
 
 public extension HIDPPTarget {
