@@ -5,7 +5,7 @@ import Foundation
 import HIDKit
 import os.log
 
-/// Runs the three-finger-tap action for the trackpads it is switched on for.
+/// Runs the finger-tap actions for the trackpads they are switched on for.
 ///
 /// Main thread except where noted. The multitouch stream is opened only while
 /// at least one trackpad has the setting on and the master switch is up —
@@ -16,8 +16,9 @@ final class TrackpadGestureController {
     private let actions: ActionRunner
     private let monitor = MultitouchMonitor()
 
+    /// Actions keyed by finger count, for one trackpad.
     private struct Binding {
-        let action: Action
+        let actions: [Int: Action]
         let device: ManagedDevice
     }
 
@@ -28,7 +29,9 @@ final class TrackpadGestureController {
     /// a "Multitouch ID" falls back to this — the one configured trackpad, if
     /// there is exactly one. Mismatched hardware is then still usable.
     private var fallback: Binding?
-    private var detectors: [UInt64: ThreeFingerTapDetector] = [:]
+    /// One detector per finger count per trackpad; they watch the same frames
+    /// and only one of them can fire for a given episode.
+    private var detectors: [UInt64: [FingerTapDetector]] = [:]
 
     init(actions: ActionRunner) {
         self.actions = actions
@@ -40,9 +43,15 @@ final class TrackpadGestureController {
         var configured: [Binding] = []
         if configuration.enabled {
             for device in devices where device.isTrackpad {
-                let setting = configuration.device(device.key).trackpad.threeFingerTap
-                guard setting.enabled else { continue }
-                let binding = Binding(action: setting.value, device: device)
+                let settings = configuration.device(device.key).trackpad
+                var actions: [Int: Action] = [:]
+                for fingers in TrackpadSettings.offeredFingerCounts {
+                    if let setting = settings.tap(fingers: fingers), setting.enabled {
+                        actions[fingers] = setting.value
+                    }
+                }
+                guard !actions.isEmpty else { continue }
+                let binding = Binding(actions: actions, device: device)
                 configured.append(binding)
                 if let id = device.multitouchID {
                     bindings[id] = binding
@@ -77,16 +86,22 @@ final class TrackpadGestureController {
     private func handle(_ frame: MultitouchMonitor.Frame) {
         lock.lock()
         let binding = bindings[frame.deviceID] ?? fallback
-        var detector = detectors[frame.deviceID] ?? ThreeFingerTapDetector()
-        let tapped = detector.process(fingerCount: frame.fingerCount, centroid: frame.centroid, timestamp: frame.timestamp)
-        detectors[frame.deviceID] = detector
+        var detectors = self.detectors[frame.deviceID]
+            ?? TrackpadSettings.offeredFingerCounts.map { FingerTapDetector(fingers: $0) }
+        var tapped: Int?
+        for index in detectors.indices {
+            if detectors[index].process(fingerCount: frame.fingerCount, centroid: frame.centroid, timestamp: frame.timestamp) {
+                tapped = detectors[index].fingers
+            }
+        }
+        self.detectors[frame.deviceID] = detectors
         lock.unlock()
 
-        guard tapped, let binding else { return }
-        os_log("three-finger tap on %{public}@ → %{public}@",
-               log: Self.log, type: .info, binding.device.displayName, binding.action.displayName)
+        guard let tapped, let binding, let action = binding.actions[tapped] else { return }
+        os_log("%{public}d-finger tap on %{public}@ → %{public}@",
+               log: Self.log, type: .info, tapped, binding.device.displayName, action.displayName)
         DispatchQueue.main.async { [actions] in
-            actions.run(binding.action, device: binding.device)
+            actions.run(action, device: binding.device)
         }
     }
 }

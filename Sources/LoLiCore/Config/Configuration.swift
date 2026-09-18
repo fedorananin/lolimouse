@@ -480,12 +480,39 @@ public struct TrackpadSettings: Codable, Equatable, Sendable {
     /// same gesture to Look Up by default, so the user has to switch that
     /// off in System Settings › Trackpad for this to be the only response.
     public var threeFingerTap: Setting<Action>
+    /// Same for four fingers. macOS has no default tap for four, so this one
+    /// needs nothing switched off elsewhere.
+    public var fourFingerTap: Setting<Action>
 
-    public init(threeFingerTap: Setting<Action> = .off(.mouseButton(2))) {
+    public init(
+        threeFingerTap: Setting<Action> = .off(.mouseButton(2)),
+        fourFingerTap: Setting<Action> = .off(.missionControl)
+    ) {
         self.threeFingerTap = threeFingerTap
+        self.fourFingerTap = fourFingerTap
     }
 
-    public var managesAnything: Bool { threeFingerTap.enabled }
+    // A config written before the four-finger tap existed has no key for it.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        threeFingerTap = try container.decodeIfPresent(Setting<Action>.self, forKey: .threeFingerTap)
+            ?? .off(.mouseButton(2))
+        fourFingerTap = try container.decodeIfPresent(Setting<Action>.self, forKey: .fourFingerTap)
+            ?? .off(.missionControl)
+    }
+
+    /// The tap setting for a finger count, or `nil` for counts not offered.
+    public func tap(fingers: Int) -> Setting<Action>? {
+        switch fingers {
+        case 3: return threeFingerTap
+        case 4: return fourFingerTap
+        default: return nil
+        }
+    }
+
+    public static let offeredFingerCounts = [3, 4]
+
+    public var managesAnything: Bool { threeFingerTap.enabled || fourFingerTap.enabled }
 }
 
 // MARK: - Per-device configuration

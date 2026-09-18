@@ -26,16 +26,27 @@ struct ButtonsSection: View {
 
     private var threeFingerTap: some View {
         SettingsSection(
-            title: "Three-finger tap",
-            subtitle: "A quick tap with three fingers, without moving them."
+            title: "Finger taps",
+            subtitle: "A quick tap with several fingers, without moving them."
         ) {
             ManagedSetting(
-                title: "Take over this gesture",
+                title: "Three-finger tap",
                 help: "macOS uses the same tap for Look Up. Turn that off under System Settings › "
                     + "Trackpad › Point & Click, otherwise both will fire.",
                 isManaged: model.enabled(\.trackpad.threeFingerTap)
             ) {
                 ActionPicker(label: "Tap", action: model.value(\.trackpad.threeFingerTap))
+                    .frame(width: 320)
+            }
+
+            Divider()
+
+            ManagedSetting(
+                title: "Four-finger tap",
+                help: "macOS has no default for this one, so nothing needs switching off.",
+                isManaged: model.enabled(\.trackpad.fourFingerTap)
+            ) {
+                ActionPicker(label: "Tap", action: model.value(\.trackpad.fourFingerTap))
                     .frame(width: 320)
             }
         }

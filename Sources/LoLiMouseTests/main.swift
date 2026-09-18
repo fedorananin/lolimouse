@@ -646,9 +646,9 @@ suite("Event thread") {
 
 // MARK: - Three-finger tap
 
-suite("Three-finger tap — only a quick, still, three-finger touch counts") {
+suite("Finger taps — only a quick, still touch with exactly N fingers counts") {
     // Frames as MultitouchSupport delivers them: finger count and centroid.
-    func feed(_ detector: inout ThreeFingerTapDetector, _ frames: [(Int, Double, Double, Double)]) -> Int {
+    func feed(_ detector: inout FingerTapDetector, _ frames: [(Int, Double, Double, Double)]) -> Int {
         var taps = 0
         for (count, x, y, t) in frames {
             let centroid: (x: Double, y: Double)? = count > 0 ? (x, y) : nil
@@ -658,34 +658,34 @@ suite("Three-finger tap — only a quick, still, three-finger touch counts") {
     }
 
     test("three fingers down and up quickly is a tap") {
-        var detector = ThreeFingerTapDetector()
+        var detector = FingerTapDetector(fingers: 3)
         let taps = feed(&detector, [(1, 0.5, 0.5, 0.00), (3, 0.5, 0.5, 0.02), (3, 0.5, 0.5, 0.10),
                                     (2, 0.5, 0.5, 0.14), (0, 0, 0, 0.16)])
         expectEqual(taps, 1)
     }
 
     test("the tap fires on the frame the last finger lifts, never earlier") {
-        var detector = ThreeFingerTapDetector()
+        var detector = FingerTapDetector(fingers: 3)
         expectEqual(detector.process(fingerCount: 3, centroid: (0.5, 0.5), timestamp: 0), false)
         expectEqual(detector.process(fingerCount: 3, centroid: (0.5, 0.5), timestamp: 0.05), false)
         expectEqual(detector.process(fingerCount: 0, centroid: nil, timestamp: 0.1), true)
     }
 
     test("two or four fingers are not a tap") {
-        var detector = ThreeFingerTapDetector()
+        var detector = FingerTapDetector(fingers: 3)
         expectEqual(feed(&detector, [(2, 0.5, 0.5, 0), (0, 0, 0, 0.1)]), 0, "two fingers")
         expectEqual(feed(&detector, [(3, 0.5, 0.5, 0), (4, 0.5, 0.5, 0.05), (0, 0, 0, 0.1)]), 0,
                     "four fingers at the peak — a four-finger gesture, not a tap")
     }
 
     test("a three-finger swipe is left to macOS") {
-        var detector = ThreeFingerTapDetector()
+        var detector = FingerTapDetector(fingers: 3)
         let taps = feed(&detector, [(3, 0.2, 0.5, 0), (3, 0.4, 0.5, 0.05), (3, 0.6, 0.5, 0.1), (0, 0, 0, 0.15)])
         expectEqual(taps, 0)
     }
 
     test("a long press is not a tap") {
-        var detector = ThreeFingerTapDetector()
+        var detector = FingerTapDetector(fingers: 3)
         let taps = feed(&detector, [(3, 0.5, 0.5, 0), (3, 0.5, 0.5, 0.5), (0, 0, 0, 1.0)])
         expectEqual(taps, 0)
     }
@@ -693,14 +693,27 @@ suite("Three-finger tap — only a quick, still, three-finger touch counts") {
     test("the centroid shift while fingers land does not count as movement") {
         // With one finger the centroid is that finger; with three it is their
         // middle. That jump must not be mistaken for a swipe.
-        var detector = ThreeFingerTapDetector()
+        var detector = FingerTapDetector(fingers: 3)
         let taps = feed(&detector, [(1, 0.2, 0.5, 0), (2, 0.35, 0.5, 0.01), (3, 0.5, 0.5, 0.02),
                                     (3, 0.5, 0.5, 0.08), (1, 0.8, 0.5, 0.1), (0, 0, 0, 0.12)])
         expectEqual(taps, 1)
     }
 
+    test("a four-finger detector accepts four and rejects three") {
+        var detector = FingerTapDetector(fingers: 4)
+        expectEqual(feed(&detector, [(3, 0.5, 0.5, 0), (4, 0.5, 0.5, 0.03), (0, 0, 0, 0.1)]), 1)
+        expectEqual(feed(&detector, [(3, 0.5, 0.5, 1), (0, 0, 0, 1.1)]), 0)
+    }
+
+    test("three- and four-finger detectors watching the same frames never both fire") {
+        var three = FingerTapDetector(fingers: 3)
+        var four = FingerTapDetector(fingers: 4)
+        let frames: [(Int, Double, Double, Double)] = [(3, 0.5, 0.5, 0), (4, 0.5, 0.5, 0.03), (0, 0, 0, 0.1)]
+        expectEqual(feed(&three, frames) + feed(&four, frames), 1)
+    }
+
     test("consecutive taps each fire once") {
-        var detector = ThreeFingerTapDetector()
+        var detector = FingerTapDetector(fingers: 3)
         let one: [(Int, Double, Double, Double)] = [(3, 0.5, 0.5, 0), (0, 0, 0, 0.1)]
         let two: [(Int, Double, Double, Double)] = [(3, 0.5, 0.5, 1), (0, 0, 0, 1.1)]
         expectEqual(feed(&detector, one + two), 2)
@@ -715,6 +728,9 @@ suite("Three-finger tap — only a quick, still, three-finger touch counts") {
         let trackpad = decoded.device("usb:1:2").trackpad
         expectEqual(trackpad.threeFingerTap.enabled, false)
         expectEqual(trackpad.threeFingerTap.value, .mouseButton(2), "middle click is the default action")
+        expectEqual(trackpad.fourFingerTap.enabled, false)
+        expectEqual(trackpad.tap(fingers: 4)?.value, .missionControl)
+        expectNil(trackpad.tap(fingers: 5))
         expectEqual(decoded.device("usb:1:2").managesAnything, false)
     }
 }

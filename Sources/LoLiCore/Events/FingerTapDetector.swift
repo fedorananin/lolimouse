@@ -3,14 +3,17 @@
 
 import Foundation
 
-/// Turns a stream of finger counts into "three fingers tapped" decisions.
+/// Turns a stream of finger counts into "N fingers tapped" decisions.
 ///
 /// Pure and synchronous so it can be tested without a trackpad. One episode
 /// runs from the first finger touching down to the last one lifting; it is a
-/// tap when exactly three fingers were down at the peak, they did not travel,
-/// and the whole thing was over quickly. Anything else — a fourth finger, a
-/// three-finger swipe, a slow press — is left entirely to macOS.
-public struct ThreeFingerTapDetector: Sendable {
+/// tap when exactly `fingers` were down at the peak, they did not travel,
+/// and the whole thing was over quickly. Anything else — one finger more, a
+/// swipe, a slow press — is left entirely to macOS.
+public struct FingerTapDetector: Sendable {
+    /// How many fingers make the tap. Three and four are what macOS itself
+    /// distinguishes; anything else is accepted but untested on hardware.
+    public let fingers: Int
     /// Longest an episode may last and still be a tap.
     public var maximumDuration: TimeInterval
     /// How far the three-finger centroid may drift, in 0…1 surface units.
@@ -22,7 +25,8 @@ public struct ThreeFingerTapDetector: Sendable {
     private var origin: (x: Double, y: Double)?
     private var travel: Double = 0
 
-    public init(maximumDuration: TimeInterval = 0.35, maximumTravel: Double = 0.05) {
+    public init(fingers: Int, maximumDuration: TimeInterval = 0.35, maximumTravel: Double = 0.05) {
+        self.fingers = fingers
         self.maximumDuration = maximumDuration
         self.maximumTravel = maximumTravel
     }
@@ -37,9 +41,9 @@ public struct ThreeFingerTapDetector: Sendable {
                 travel = 0
             }
             peakFingers = max(peakFingers, fingerCount)
-            // Movement only counts while all three are down: the centroid
+            // Movement only counts while the full set is down: the centroid
             // jumps on its own as fingers land and lift.
-            if fingerCount == 3, let centroid {
+            if fingerCount == fingers, let centroid {
                 if let origin {
                     travel = max(travel, hypot(centroid.x - origin.x, centroid.y - origin.y))
                 } else {
@@ -51,7 +55,7 @@ public struct ThreeFingerTapDetector: Sendable {
 
         guard let start = episodeStart else { return false }
         episodeStart = nil
-        return peakFingers == 3
+        return peakFingers == fingers
             && timestamp - start <= maximumDuration
             && travel <= maximumTravel
     }
