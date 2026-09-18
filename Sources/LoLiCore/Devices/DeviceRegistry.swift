@@ -82,6 +82,13 @@ public final class ManagedDevice: Identifiable, ObservableObject {
     }
 
     public var supportsHardwareSettings: Bool { target != nil }
+
+    /// A multitouch surface rather than a mouse: the built-in trackpad or an
+    /// external one. Gets the trackpad gesture settings.
+    public var isTrackpad: Bool { pointerService?.isTrackpad ?? false }
+
+    /// Pairs this trackpad with the stream MultitouchSupport delivers.
+    public var multitouchID: UInt64? { pointerService?.multitouchID }
 }
 
 /// Discovers mice and keeps the live device list up to date.

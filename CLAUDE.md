@@ -38,7 +38,10 @@ exist because of it:
    `kCGHIDEventTap` sits in front of every input event on the machine. With no
    scrolling or button settings switched on, no tap is installed at all, and the
    tap only ever asks for the event types it acts on (`flagsChanged` is added to
-   the mask only while a pinch-zoom modifier action is configured).
+   the mask only while a pinch-zoom modifier action is configured). The same
+   rule covers the multitouch stream: `MultitouchMonitor` runs only while a
+   trackpad has a gesture setting switched on. It does not go through
+   `IOHIDDeviceOpen`, but it is still a private channel into a driver.
 
 **Do not launch the app on a user's machine without asking first.** Verifying a
 change usually means `make test` plus reading the code. When a real run is
@@ -99,7 +102,7 @@ trust settings is unnecessary.
 | Target | Responsibility |
 |---|---|
 | `IOKitSPI` | The few private IOKit/CoreGraphics declarations Apple ships as symbols but not headers. Keep it minimal — anything with a public equivalent uses that. |
-| `HIDKit` | `IOHIDManager` discovery, synchronous HID report transactions, per-device pointer tuning via `IOHIDServiceClient`. |
+| `HIDKit` | `IOHIDManager` discovery, synchronous HID report transactions, per-device pointer tuning via `IOHIDServiceClient`, trackpad contact frames via MultitouchSupport. |
 | `HIDPP` | Logitech HID++ 1.0/2.0: framing, feature resolution, receiver slots, typed feature wrappers. |
 | `LoLiCore` | Configuration, device registry, hardware reconciler, CGEvent pipeline. |
 | `LoLiMouseApp` | AppKit lifecycle (`@main` app delegate, own `NSStatusItem`, `NSHostingController`-hosted SwiftUI views). Not a SwiftUI `App` on purpose: a `MenuBarExtra` scene terminates the app when its icon is hidden, and a suppressed `Window` scene cannot be opened from AppKit at all. Do not reintroduce SwiftUI scenes. |
@@ -149,7 +152,7 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
   (`0xFF`) connection.
 - Battery level (`0x1004` / `0x1000`) read back and shown in the menu and next
   to the menu bar icon.
-- 66 tests pass.
+- 74 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:
@@ -164,6 +167,9 @@ the two reference implementations, never exercised against a real device:
   dynamic `flagsChanged` tap mask
 - Modifier-qualified button mappings (⌘+button → different action)
 - Media/brightness actions (NX system-defined key events)
+- Three-finger tap on a trackpad (`MultitouchMonitor`, private
+  MultitouchSupport framework resolved with `dlsym`; pairing with the registry
+  through the IORegistry "Multitouch ID" property)
 
 Do not describe any of the above as working until it has been seen working.
 

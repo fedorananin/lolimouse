@@ -644,6 +644,81 @@ suite("Event thread") {
     }
 }
 
+// MARK: - Three-finger tap
+
+suite("Three-finger tap — only a quick, still, three-finger touch counts") {
+    // Frames as MultitouchSupport delivers them: finger count and centroid.
+    func feed(_ detector: inout ThreeFingerTapDetector, _ frames: [(Int, Double, Double, Double)]) -> Int {
+        var taps = 0
+        for (count, x, y, t) in frames {
+            let centroid: (x: Double, y: Double)? = count > 0 ? (x, y) : nil
+            if detector.process(fingerCount: count, centroid: centroid, timestamp: t) { taps += 1 }
+        }
+        return taps
+    }
+
+    test("three fingers down and up quickly is a tap") {
+        var detector = ThreeFingerTapDetector()
+        let taps = feed(&detector, [(1, 0.5, 0.5, 0.00), (3, 0.5, 0.5, 0.02), (3, 0.5, 0.5, 0.10),
+                                    (2, 0.5, 0.5, 0.14), (0, 0, 0, 0.16)])
+        expectEqual(taps, 1)
+    }
+
+    test("the tap fires on the frame the last finger lifts, never earlier") {
+        var detector = ThreeFingerTapDetector()
+        expectEqual(detector.process(fingerCount: 3, centroid: (0.5, 0.5), timestamp: 0), false)
+        expectEqual(detector.process(fingerCount: 3, centroid: (0.5, 0.5), timestamp: 0.05), false)
+        expectEqual(detector.process(fingerCount: 0, centroid: nil, timestamp: 0.1), true)
+    }
+
+    test("two or four fingers are not a tap") {
+        var detector = ThreeFingerTapDetector()
+        expectEqual(feed(&detector, [(2, 0.5, 0.5, 0), (0, 0, 0, 0.1)]), 0, "two fingers")
+        expectEqual(feed(&detector, [(3, 0.5, 0.5, 0), (4, 0.5, 0.5, 0.05), (0, 0, 0, 0.1)]), 0,
+                    "four fingers at the peak — a four-finger gesture, not a tap")
+    }
+
+    test("a three-finger swipe is left to macOS") {
+        var detector = ThreeFingerTapDetector()
+        let taps = feed(&detector, [(3, 0.2, 0.5, 0), (3, 0.4, 0.5, 0.05), (3, 0.6, 0.5, 0.1), (0, 0, 0, 0.15)])
+        expectEqual(taps, 0)
+    }
+
+    test("a long press is not a tap") {
+        var detector = ThreeFingerTapDetector()
+        let taps = feed(&detector, [(3, 0.5, 0.5, 0), (3, 0.5, 0.5, 0.5), (0, 0, 0, 1.0)])
+        expectEqual(taps, 0)
+    }
+
+    test("the centroid shift while fingers land does not count as movement") {
+        // With one finger the centroid is that finger; with three it is their
+        // middle. That jump must not be mistaken for a swipe.
+        var detector = ThreeFingerTapDetector()
+        let taps = feed(&detector, [(1, 0.2, 0.5, 0), (2, 0.35, 0.5, 0.01), (3, 0.5, 0.5, 0.02),
+                                    (3, 0.5, 0.5, 0.08), (1, 0.8, 0.5, 0.1), (0, 0, 0, 0.12)])
+        expectEqual(taps, 1)
+    }
+
+    test("consecutive taps each fire once") {
+        var detector = ThreeFingerTapDetector()
+        let one: [(Int, Double, Double, Double)] = [(3, 0.5, 0.5, 0), (0, 0, 0, 0.1)]
+        let two: [(Int, Double, Double, Double)] = [(3, 0.5, 0.5, 1), (0, 0, 0, 1.1)]
+        expectEqual(feed(&detector, one + two), 2)
+    }
+
+    test("the trackpad setting is off by default and decodes when absent") {
+        let json = Data(#"{"schemaVersion": 1, "devices": {"usb:1:2": {"displayName": "Trackpad"}}, "enabled": true}"#.utf8)
+        guard let decoded = try? JSONDecoder().decode(Configuration.self, from: json) else {
+            expect(false, "decoding failed")
+            return
+        }
+        let trackpad = decoded.device("usb:1:2").trackpad
+        expectEqual(trackpad.threeFingerTap.enabled, false)
+        expectEqual(trackpad.threeFingerTap.value, .mouseButton(2), "middle click is the default action")
+        expectEqual(decoded.device("usb:1:2").managesAnything, false)
+    }
+}
+
 // MARK: - Reconciler
 
 suite("Reconciler — nothing is written while the Mac sleeps") {

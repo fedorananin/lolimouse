@@ -213,7 +213,9 @@ struct DeviceDetailView: View {
                 Text(device.displayName).font(.title2.weight(.semibold))
                 Text(device.supportsHardwareSettings
                     ? "Logitech HID++ — hardware settings available"
-                    : "Generic pointing device — scrolling and buttons only")
+                    : device.isTrackpad
+                        ? "Trackpad — scrolling, buttons and gestures"
+                        : "Generic pointing device — scrolling and buttons only")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 batteryToggle

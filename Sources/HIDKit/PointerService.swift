@@ -113,6 +113,32 @@ public final class PointerService {
     public func conformsTo(usagePage: Int, usage: Int) -> Bool {
         IOHIDServiceClientConformsTo(client, UInt32(usagePage), UInt32(usage)) != 0
     }
+
+    /// Trackpads advertise the Digitizer/TouchPad usage pair next to the
+    /// mouse one; mice never do.
+    public var isTrackpad: Bool {
+        conformsTo(usagePage: kHIDPage_Digitizer, usage: kHIDUsage_Dig_TouchPad)
+    }
+
+    /// The ID MultitouchSupport reports for this trackpad, or `nil` for a
+    /// device with no multitouch surface.
+    ///
+    /// The trackpad's HID event driver has an `AppleMultitouchDevice` child
+    /// in the IORegistry carrying a "Multitouch ID" property, and that is the
+    /// same number `MTDeviceGetDeviceID` hands back. Reading it is a plain
+    /// registry lookup: nothing is opened.
+    public private(set) lazy var multitouchID: UInt64? = Self.multitouchID(under: registryID)
+
+    private static func multitouchID(under registryID: UInt64) -> UInt64? {
+        let entry = IOServiceGetMatchingService(kIOMainPortDefault, IORegistryEntryIDMatching(registryID))
+        guard entry != 0 else { return nil }
+        defer { IOObjectRelease(entry) }
+        let value = IORegistryEntrySearchCFProperty(
+            entry, kIOServicePlane, "Multitouch ID" as CFString,
+            kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)
+        )
+        return (value as? NSNumber)?.uint64Value
+    }
 }
 
 /// Enumerates pointer `IOHIDServiceClient`s and resolves an event's sender ID

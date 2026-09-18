@@ -471,6 +471,23 @@ public struct ButtonSettings: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Trackpad gestures
+
+/// Gestures read from a trackpad's multitouch surface. Only meaningful on a
+/// device whose pointer service reports a touch pad.
+public struct TrackpadSettings: Codable, Equatable, Sendable {
+    /// What a quick tap with exactly three fingers does. macOS binds the
+    /// same gesture to Look Up by default, so the user has to switch that
+    /// off in System Settings › Trackpad for this to be the only response.
+    public var threeFingerTap: Setting<Action>
+
+    public init(threeFingerTap: Setting<Action> = .off(.mouseButton(2))) {
+        self.threeFingerTap = threeFingerTap
+    }
+
+    public var managesAnything: Bool { threeFingerTap.enabled }
+}
+
 // MARK: - Per-device configuration
 
 public struct DeviceConfiguration: Codable, Equatable, Sendable {
@@ -481,6 +498,7 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
     public var pointer: PointerSettings
     public var scrolling: ScrollingSettings
     public var buttons: ButtonSettings
+    public var trackpad: TrackpadSettings
     /// Whether this device's charge is written next to the menu bar icon. A
     /// plain bool like `showMenuBarIcon`: it changes nothing outside the app,
     /// so there is nothing to baseline or restore. Per device rather than
@@ -494,6 +512,7 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
         pointer: PointerSettings = PointerSettings(),
         scrolling: ScrollingSettings = ScrollingSettings(),
         buttons: ButtonSettings = ButtonSettings(),
+        trackpad: TrackpadSettings = TrackpadSettings(),
         showBatteryInMenuBar: Bool = false
     ) {
         self.displayName = displayName
@@ -501,6 +520,7 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
         self.pointer = pointer
         self.scrolling = scrolling
         self.buttons = buttons
+        self.trackpad = trackpad
         self.showBatteryInMenuBar = showBatteryInMenuBar
     }
 
@@ -513,12 +533,14 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
         pointer = try container.decodeIfPresent(PointerSettings.self, forKey: .pointer) ?? PointerSettings()
         scrolling = try container.decodeIfPresent(ScrollingSettings.self, forKey: .scrolling) ?? ScrollingSettings()
         buttons = try container.decodeIfPresent(ButtonSettings.self, forKey: .buttons) ?? ButtonSettings()
+        trackpad = try container.decodeIfPresent(TrackpadSettings.self, forKey: .trackpad) ?? TrackpadSettings()
         showBatteryInMenuBar = try container.decodeIfPresent(Bool.self, forKey: .showBatteryInMenuBar) ?? false
     }
 
     public var managesAnything: Bool {
         hardware.managesAnything || pointer.managesAnything
             || scrolling.managesAnything || buttons.managesAnything
+            || trackpad.managesAnything
     }
 }
 

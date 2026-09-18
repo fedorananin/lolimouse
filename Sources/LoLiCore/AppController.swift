@@ -26,6 +26,7 @@ public final class AppController: ObservableObject {
     @Published public private(set) var isRunning = false
 
     private lazy var router = DivertedButtonRouter(actions: actions)
+    private lazy var trackpadGestures = TrackpadGestureController(actions: actions)
     private var eventTap: EventTap?
 
     /// The event thread's view of the world. Guarded by `snapshotLock`;
@@ -137,6 +138,7 @@ public final class AppController: ObservableObject {
         batteryTimer = nil
         removeEventTap()
         router.detachAll()
+        trackpadGestures.stop()
         // Quitting while asleep is rare but must still put the mouse back.
         reconciler.resume()
         reconciler.restoreAll(devices: registry.devices)
@@ -355,6 +357,7 @@ public final class AppController: ObservableObject {
         router.retain(devices)
         rebuildProcessors(devices)
         updateEventTap()
+        trackpadGestures.update(devices: devices, configuration: store.configuration)
 
         for device in devices {
             let configuration = store.configuration.device(device.key)
@@ -386,6 +389,7 @@ public final class AppController: ObservableObject {
     private func configurationChanged(_ configuration: Configuration) {
         rebuildProcessors(registry.devices)
         updateEventTap()
+        trackpadGestures.update(devices: registry.devices, configuration: configuration)
 
         for device in registry.devices {
             let deviceConfiguration = configuration.device(device.key)

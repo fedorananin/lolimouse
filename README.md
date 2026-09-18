@@ -118,6 +118,11 @@ Event handling:
 - **Media and hardware keys as actions** — volume, mute, play/pause, track
   skipping and display brightness can all be bound to buttons and gestures.
 
+- **Three-finger tap on the trackpad** — the built-in one or an external one.
+  Tap with three fingers and get a middle click, or any other action from the
+  list. Off by default; switch off Look Up under System Settings › Trackpad so
+  the two do not fire together.
+
 And the small things:
 
 - **Battery level** in the menu and in the settings window, over HID++. Each
