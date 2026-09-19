@@ -148,6 +148,39 @@ suite("Configuration") {
 
 // MARK: - Wheel ratchet
 
+suite("Event fallback — a trackpad gesture must not disarm the mouse") {
+    // The morning after finger taps went in, reverse scrolling stopped: the
+    // trackpad's new config entry made it a second "configured" device, the
+    // sole-device fallback went away, and every scroll event whose sender ID
+    // the registry had not seen sailed through untouched.
+    var mouse = DeviceConfiguration()
+    mouse.scrolling.vertical.reverse = .on(true)
+    var trackpad = DeviceConfiguration()
+    trackpad.trackpad.threeFingerTap = .on(.mouseButton(2))
+
+    test("finger-tap settings do not use the event tap") {
+        expectEqual(trackpad.usesEventTap, false)
+        expectEqual(mouse.usesEventTap, true)
+        expectEqual(DeviceConfiguration().usesEventTap, false)
+    }
+
+    test("the mouse stays the sole fallback next to a trackpad with gestures") {
+        let configuration = Configuration(devices: ["mouse": mouse, "pad": trackpad])
+        expectEqual(configuration.soleEventTapDevice(among: ["mouse", "pad"]), "mouse")
+    }
+
+    test("two devices with scrolling settings leave no fallback") {
+        let configuration = Configuration(devices: ["a": mouse, "b": mouse])
+        expectNil(configuration.soleEventTapDevice(among: ["a", "b"]))
+    }
+
+    test("only attached devices are candidates") {
+        let configuration = Configuration(devices: ["mouse": mouse, "other": mouse])
+        expectEqual(configuration.soleEventTapDevice(among: ["mouse"]), "mouse")
+        expectNil(configuration.soleEventTapDevice(among: []))
+    }
+}
+
 suite("Wheel ratchet — the setting Logitech does not offer") {
     test("always-ratchet sends the permanent sentinel") {
         let setting = WheelRatchetSetting(mode: .alwaysRatchet, threshold: 16)

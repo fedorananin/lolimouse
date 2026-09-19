@@ -42,6 +42,9 @@ public final class AppController: ObservableObject {
     private var modifierTransformers: [String: ModifierKeyTransformer] = [:]
     /// Only ever touched from the event thread.
     private var swallowedButtons: Set<Int> = []
+    /// When the last rescan was requested because an event carried a sender
+    /// ID nobody in the registry owns. Only ever touched from the event thread.
+    private var lastUnknownSenderRescan: TimeInterval = 0
 
     private var subscriptions = Set<AnyCancellable>()
     private var permissionTimer: Timer?
@@ -116,6 +119,12 @@ public final class AppController: ObservableObject {
             reconcileAll(confirm: true, reason: "system wake")
             registry.refreshBatteries()
             startBatteryTimer()
+            // A Bluetooth mouse comes back from sleep with a freshly created
+            // event service, and the sender ID stamped on its scroll events
+            // changes with it. The IDs the registry remembers are from the
+            // last scan, so scan again or the tap will not recognise the
+            // mouse. Cost the reverse-scroll setting one morning.
+            registry.rescan()
         }
     }
 
@@ -206,10 +215,8 @@ public final class AppController: ObservableObject {
     /// safe default and the honest one.
     private func updateEventTap() {
         let configuration = store.configuration
-        let needed = configuration.enabled && registry.devices.contains { device in
-            let deviceConfiguration = configuration.device(device.key)
-            return deviceConfiguration.scrolling.managesAnything
-                || deviceConfiguration.buttons.mappings.enabled
+        let needed = configuration.enabled && registry.devices.contains {
+            configuration.device($0.key).usesEventTap
         }
 
         if !needed {
@@ -293,7 +300,10 @@ public final class AppController: ObservableObject {
     }
 
     private func handleScroll(_ event: CGEvent, snapshot: EventSnapshot) -> CGEvent? {
-        guard let key = snapshot.deviceKey(for: event) else { return event }
+        guard let key = snapshot.deviceKey(for: event) else {
+            noteUnknownSender(of: event)
+            return event
+        }
 
         var current = event
         if let transformer = snapshot.modifierTransformers[key] {
@@ -314,8 +324,11 @@ public final class AppController: ObservableObject {
             return event
         }
 
-        guard let key = snapshot.deviceKey(for: event),
-              let mapping = ButtonMapping.bestMatch(
+        guard let key = snapshot.deviceKey(for: event) else {
+            noteUnknownSender(of: event)
+            return event
+        }
+        guard let mapping = ButtonMapping.bestMatch(
                   in: snapshot.buttonMappings[key] ?? [],
                   button: button,
                   held: ModifierKey.held(in: event.flags)
@@ -329,14 +342,30 @@ public final class AppController: ObservableObject {
         return nil
     }
 
+    /// An event arrived from a sender the registry does not know. That is
+    /// what a Bluetooth mouse looks like after a reconnect the HID monitor
+    /// did not report (its event service was recreated with a new registry
+    /// ID), so ask for a rescan — at most once every few seconds, because a
+    /// wheel produces hundreds of events and one scan is enough.
+    ///
+    /// Runs on the event thread; the registry is poked from the main queue.
+    private func noteUnknownSender(of event: CGEvent) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastUnknownSenderRescan > 5 else { return }
+        lastUnknownSenderRescan = now
+        os_log("event from unknown sender 0x%llX; rescanning devices",
+               log: Self.log, type: .info, event.senderID ?? 0)
+        DispatchQueue.main.async { [weak self] in self?.registry.rescan() }
+    }
+
     /// An immutable view of everything the event thread needs, published from
     /// the main thread whenever devices or configuration change.
     private struct EventSnapshot {
         var enabled = false
         var senderToKey: [UInt64: String] = [:]
-        /// The only configured device, used when macOS cannot tell us which
-        /// device produced an event. With several configured devices, guessing
-        /// would be worse than doing nothing.
+        /// The only device with event-tap settings, used when macOS cannot
+        /// tell us which device produced an event or the sender ID is not one
+        /// we know. See `Configuration.soleEventTapDevice(among:)`.
         var soleConfiguredKey: String?
         var processors: [String: ScrollProcessor] = [:]
         var modifierTransformers: [String: ModifierKeyTransformer] = [:]
@@ -449,13 +478,11 @@ public final class AppController: ObservableObject {
         scrollProcessors = processors
         modifierTransformers = transformers
 
-        let configured = devices.filter { configuration.devices[$0.key] != nil }
-
         snapshotLock.lock()
         snapshot = EventSnapshot(
             enabled: configuration.enabled,
             senderToKey: senderToKey,
-            soleConfiguredKey: configured.count == 1 ? configured.first?.key : nil,
+            soleConfiguredKey: configuration.soleEventTapDevice(among: devices.map(\.key)),
             processors: processors,
             modifierTransformers: transformers,
             buttonMappings: buttonMappings,

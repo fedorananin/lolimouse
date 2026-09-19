@@ -569,6 +569,13 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
             || scrolling.managesAnything || buttons.managesAnything
             || trackpad.managesAnything
     }
+
+    /// Whether this device needs the CGEvent tap at all: scrolling settings
+    /// or button remaps. Hardware, pointer and trackpad-gesture settings do
+    /// not go through the tap and must not count here.
+    public var usesEventTap: Bool {
+        scrolling.managesAnything || buttons.mappings.enabled
+    }
 }
 
 // MARK: - Root
@@ -621,6 +628,20 @@ public struct Configuration: Codable, Equatable, Sendable {
         var configuration = devices[key] ?? DeviceConfiguration()
         transform(&configuration)
         devices[key] = configuration
+    }
+
+    /// The one device among `keys` whose settings go through the event tap,
+    /// or `nil` when there is none or more than one.
+    ///
+    /// This is the fallback for an event whose sender macOS does not tell us
+    /// (or whose sender ID we do not know yet): with exactly one candidate it
+    /// is obviously the source, with several guessing would be worse than
+    /// doing nothing. Counting by "has a config entry" was wrong — the
+    /// built-in trackpad gains an entry the moment a finger-tap gesture is
+    /// switched on, and that must not disarm the fallback for the mouse.
+    public func soleEventTapDevice(among keys: [String]) -> String? {
+        let candidates = keys.filter { device($0).usesEventTap }
+        return candidates.count == 1 ? candidates.first : nil
     }
 }
 

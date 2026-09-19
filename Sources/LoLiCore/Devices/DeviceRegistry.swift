@@ -255,8 +255,15 @@ public final class DeviceRegistry: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             devices = result
-            os_log("device scan: %{public}d device(s), %{public}d new",
-                   log: Self.log, type: .info, result.count, arrived.count)
+            // The sender IDs are what the event tap matches scroll and button
+            // events against; logging them is the only way to tell "the tap
+            // ignored the mouse" apart from "the tap was never installed".
+            let summary = result.map { device in
+                let senders = device.senderIDs.sorted().map { String($0, radix: 16) }.joined(separator: ",")
+                return "\(device.displayName) [\(senders)]"
+            }.joined(separator: "; ")
+            os_log("device scan: %{public}d device(s), %{public}d new: %{public}@",
+                   log: Self.log, type: .info, result.count, arrived.count, summary)
             onDevicesChanged?(result, arrived)
         }
     }
