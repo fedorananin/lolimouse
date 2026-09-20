@@ -24,8 +24,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var visibilityObservation: NSKeyValueObservation?
     private var cancellables: Set<AnyCancellable> = []
     /// One subscription per device, because `battery` is published on
-    /// `ManagedDevice` rather than on the registry.
-    private var batteryObservations: [String: AnyCancellable] = [:]
+    /// `ManagedDevice` rather than on the registry. Keyed by object identity,
+    /// not by `device.key`: a rescan builds *new* `ManagedDevice` instances
+    /// for the same mice, and keying by the stable key made this hold on to
+    /// the discarded object — the title then froze at the level read during
+    /// that scan while the menu, which reads the live device, moved on.
+    private var batteryObservations: [ObjectIdentifier: AnyCancellable] = [:]
 
     init(controller: AppController, openSettings: @escaping () -> Void) {
         self.controller = controller
@@ -64,12 +68,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Keeps one battery subscription alive per device. Devices that have gone
     /// away drop theirs; new ones get one when they are published.
     private func observeBatteries(_ devices: [ManagedDevice]) {
-        let keys = Set(devices.map(\.key))
-        for key in batteryObservations.keys.filter({ !keys.contains($0) }) {
-            batteryObservations.removeValue(forKey: key)
+        let identities = Set(devices.map { ObjectIdentifier($0) })
+        for identity in batteryObservations.keys.filter({ !identities.contains($0) }) {
+            batteryObservations.removeValue(forKey: identity)
         }
-        for device in devices where batteryObservations[device.key] == nil {
-            batteryObservations[device.key] = device.$battery
+        for device in devices where batteryObservations[ObjectIdentifier(device)] == nil {
+            batteryObservations[ObjectIdentifier(device)] = device.$battery
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in self?.updateBatteryTitle() }
         }
