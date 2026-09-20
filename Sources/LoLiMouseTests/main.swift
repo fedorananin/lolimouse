@@ -893,4 +893,59 @@ suite("Service matching — one physical mouse must never become two devices") {
     }
 }
 
+suite("Diverted button subscriptions — a rescan must not leave a dead one behind") {
+    // Stands in for a ManagedDevice: the table only ever looks at identity.
+    final class Device {}
+
+    test("a subscription is recognised only on the object it was made for") {
+        var table = AttachmentTable<Int>()
+        let first = Device()
+        expect(!table.holds(key: "unit:A9", device: ObjectIdentifier(first)))
+
+        expectNil(table.insert(key: "unit:A9", device: ObjectIdentifier(first), observation: 1))
+        expect(table.holds(key: "unit:A9", device: ObjectIdentifier(first)))
+
+        // What a rescan does: same mouse, same key, brand new object.
+        let second = Device()
+        expect(!table.holds(key: "unit:A9", device: ObjectIdentifier(second)),
+               "a subscription made for the previous object must not count as attached")
+    }
+
+    test("re-attaching hands back the subscription it displaced") {
+        var table = AttachmentTable<Int>()
+        let first = Device()
+        let second = Device()
+        _ = table.insert(key: "unit:A9", device: ObjectIdentifier(first), observation: 1)
+
+        expectEqual(table.insert(key: "unit:A9", device: ObjectIdentifier(second), observation: 2), 1,
+                    "the displaced observation must come back so the caller can cancel it")
+        expect(table.holds(key: "unit:A9", device: ObjectIdentifier(second)))
+    }
+
+    test("a device that goes away takes its subscription with it") {
+        var table = AttachmentTable<Int>()
+        let mouse = Device()
+        let keyboard = Device()
+        _ = table.insert(key: "unit:A9", device: ObjectIdentifier(mouse), observation: 1)
+        _ = table.insert(key: "unit:B7", device: ObjectIdentifier(keyboard), observation: 2)
+
+        expectEqual(table.removeAll(except: ["unit:A9"]), [2])
+        expect(table.holds(key: "unit:A9", device: ObjectIdentifier(mouse)))
+
+        expectEqual(table.remove(key: "unit:A9"), 1)
+        expectNil(table.remove(key: "unit:A9"))
+        expect(table.isEmpty)
+    }
+
+    test("detaching everything returns every subscription exactly once") {
+        var table = AttachmentTable<Int>()
+        _ = table.insert(key: "unit:A9", device: ObjectIdentifier(Device()), observation: 1)
+        _ = table.insert(key: "unit:B7", device: ObjectIdentifier(Device()), observation: 2)
+
+        expectEqual(table.removeAll().sorted(), [1, 2])
+        expect(table.isEmpty)
+        expect(table.removeAll().isEmpty)
+    }
+}
+
 report()

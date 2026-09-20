@@ -22,7 +22,7 @@ public final class DivertedButtonRouter {
     private let actions: ActionRunner
     private let stateLock = NSLock()
     private var states: [String: DeviceState] = [:]
-    private var observations: [String: HIDObservation] = [:]
+    private var attachments = AttachmentTable<HIDObservation>()
 
     /// Supplies the current configuration for a device.
     public var configurationProvider: ((String) -> DeviceConfiguration)?
@@ -38,16 +38,27 @@ public final class DivertedButtonRouter {
         var gestureButtonHeld = false
     }
 
-    /// Starts listening to `device`. Safe to call repeatedly; a device that is
-    /// already being watched is left alone.
+    /// Starts listening to `device`. Safe to call repeatedly; a device already
+    /// being watched *on this same object* is left alone.
+    ///
+    /// The qualifier is the whole point. A rescan replaces every
+    /// `ManagedDevice` with a fresh object carrying the same key, and the
+    /// closure below holds its device weakly — so a subscription made for the
+    /// previous object stops resolving the moment the registry drops it, and
+    /// every diverted press is dropped on the `guard`. Matching on object
+    /// identity makes the rescan re-subscribe instead of walking away.
     public func attach(_ device: ManagedDevice) {
         guard let target = device.target else { return }
+        let identity = ObjectIdentifier(device)
 
         stateLock.lock()
-        let alreadyAttached = observations[device.key] != nil
+        let alreadyAttached = attachments.holds(key: device.key, device: identity)
         stateLock.unlock()
         guard !alreadyAttached else { return }
 
+        // Registering a second observer costs nothing at the HID layer — the
+        // endpoint multiplexes them and is already open — so the replaced
+        // subscription can be cancelled after this one is in place.
         let observation = target.channel.observeNotifications { [weak self, weak device] response in
             guard let self, let device else { return }
             guard let event = target.decodeControlEvent(response) else { return }
@@ -55,36 +66,42 @@ public final class DivertedButtonRouter {
         }
 
         stateLock.lock()
-        observations[device.key] = observation
+        let replaced = attachments.insert(key: device.key, device: identity, observation: observation)
+        // Which buttons were down is a property of the object we were watching;
+        // starting again on a new one means starting from nothing held.
         states[device.key] = DeviceState()
         stateLock.unlock()
+        replaced?.cancel()
 
-        os_log("listening for diverted buttons on %{public}@",
-               log: Self.log, type: .info, device.displayName)
+        os_log("%{public}@ for diverted buttons on %{public}@",
+               log: Self.log, type: .info,
+               replaced == nil ? "listening" : "listening again", device.displayName)
     }
 
     public func detach(_ key: String) {
         stateLock.lock()
-        observations.removeValue(forKey: key)?.cancel()
+        let observation = attachments.remove(key: key)
         states.removeValue(forKey: key)
         stateLock.unlock()
+        observation?.cancel()
     }
 
     public func detachAll() {
         stateLock.lock()
-        for observation in observations.values { observation.cancel() }
-        observations.removeAll()
+        let observations = attachments.removeAll()
         states.removeAll()
         stateLock.unlock()
+        for observation in observations { observation.cancel() }
     }
 
     /// Keeps only the devices still present.
     public func retain(_ devices: [ManagedDevice]) {
         let keep = Set(devices.map(\.key))
         stateLock.lock()
-        let stale = observations.keys.filter { !keep.contains($0) }
+        let stale = attachments.removeAll(except: keep)
+        for key in states.keys.filter({ !keep.contains($0) }) { states.removeValue(forKey: key) }
         stateLock.unlock()
-        for key in stale { detach(key) }
+        for observation in stale { observation.cancel() }
     }
 
     // MARK: - Event handling
