@@ -13,12 +13,14 @@ import LoLiCore
 /// left to show and terminates it — taking every managed mouse setting down
 /// with it. A plain `NSStatusItem` is just a view: hiding it leaves the
 /// process, the event tap and the reconciler running.
+@MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
     private let controller: AppController
     private let store: ConfigurationStore
     /// Brings the settings window forward; supplied by the app delegate, which
     /// owns the reopen logic.
     private let openSettings: () -> Void
+    private let loginItem = LoginItem()
 
     private var statusItem: NSStatusItem?
     private var visibilityObservation: NSKeyValueObservation?
@@ -145,6 +147,23 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // Re-read on every opening: the user can change the login item in
+        // System Settings while the app runs.
+        loginItem.refresh()
+        let login = NSMenuItem(title: "Start at login", action: #selector(toggleLoginItem), keyEquivalent: "")
+        login.target = self
+        login.state = loginItem.isEnabled ? .on : .off
+        menu.addItem(login)
+
+        // Always ticked while the menu can be opened at all; unticking it hides
+        // the icon, and the settings window is the way back.
+        let menuBar = NSMenuItem(title: "Show in menu bar", action: #selector(toggleMenuBarIcon), keyEquivalent: "")
+        menuBar.target = self
+        menuBar.state = store.configuration.showMenuBarIcon ? .on : .off
+        menu.addItem(menuBar)
+
+        menu.addItem(.separator())
+
         let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -177,6 +196,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func toggleEnabled() {
         store.update { $0.enabled.toggle() }
+    }
+
+    @objc private func toggleLoginItem() {
+        loginItem.setEnabled(!loginItem.isEnabled)
+    }
+
+    @objc private func toggleMenuBarIcon() {
+        store.update { $0.showMenuBarIcon.toggle() }
     }
 
     @objc private func showSettings() {
