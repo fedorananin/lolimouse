@@ -141,6 +141,18 @@ suite("Configuration") {
         expectEqual(MenuBarBattery.label(forDPI: 1200), "1200 DPI")
     }
 
+    test("the status menu lists each device with whichever readings are known") {
+        let battery = HIDPPBattery(percentage: 90, charging: false)
+        let unknown = HIDPPBattery(percentage: nil, charging: false)
+        expectEqual(MenuBarBattery.menuLabel(name: "MX Master 3S", battery: battery, dpi: 1200),
+                    "MX Master 3S — 90%, 1200 DPI")
+        expectEqual(MenuBarBattery.menuLabel(name: "MX Master 3S", battery: battery, dpi: nil),
+                    "MX Master 3S — 90%")
+        expectEqual(MenuBarBattery.menuLabel(name: "MX Master 3S", battery: unknown, dpi: 1200),
+                    "MX Master 3S — 1200 DPI")
+        expectEqual(MenuBarBattery.menuLabel(name: "Magic Mouse", battery: nil, dpi: nil), "Magic Mouse")
+    }
+
     test("DPI presets cycle and wrap around") {
         let presets = DPIPresets(values: [800, 1600, 3200], activeIndex: 0)
         expectEqual(presets.active, 800)

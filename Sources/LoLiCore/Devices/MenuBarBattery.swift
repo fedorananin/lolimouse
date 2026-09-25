@@ -20,6 +20,13 @@ public enum MenuBarBattery {
         "\(dpi) DPI"
     }
 
+    /// A device's line in the status menu: "MX Master 3S — 90%, 1200 DPI",
+    /// dropping whichever reading is not known yet.
+    public static func menuLabel(name: String, battery: HIDPPBattery?, dpi: Int?) -> String {
+        let readings = [battery.flatMap(label(for:)), dpi.map { label(forDPI: $0) }].compactMap { $0 }
+        return readings.isEmpty ? name : "\(name) — \(readings.joined(separator: ", "))"
+    }
+
     public static func label(for battery: HIDPPBattery) -> String? {
         guard let percentage = battery.percentage else { return nil }
         return "\(percentage)%\(battery.charging ? " ⚡" : "")"

@@ -210,10 +210,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func label(for device: ManagedDevice) -> String {
-        guard let battery = device.battery, let charge = MenuBarBattery.label(for: battery) else {
-            return device.displayName
-        }
-        return "\(device.displayName) — \(charge)"
+        MenuBarBattery.menuLabel(name: device.displayName, battery: device.battery, dpi: device.dpi)
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {

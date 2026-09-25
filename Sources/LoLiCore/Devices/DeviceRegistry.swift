@@ -206,6 +206,11 @@ public final class DeviceRegistry: ObservableObject {
                 // Safe to assign directly: the device is not published yet, so
                 // nothing is observing it from the main thread.
                 device.battery = try? descriptor.target.battery().get()
+                // Read once here so the menu can show it even when LoLiMouse
+                // does not manage DPI; the reconciler keeps it current after.
+                if descriptor.target.supports(.adjustableDPI) {
+                    device.dpi = (try? descriptor.target.dpi().get()).map { Int($0.current) }
+                }
                 discovered.append(device)
             }
         }
