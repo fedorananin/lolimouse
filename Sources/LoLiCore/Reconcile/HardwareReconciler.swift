@@ -39,6 +39,12 @@ public final class HardwareReconciler: ObservableObject {
 
     @Published public private(set) var statuses: [String: Status] = [:]
 
+    /// Called on the main thread once the mouse has taken a DPI value LoLiMouse
+    /// asked for — written, or found already in force. What the menu bar
+    /// announces after a preset change is this, not the configuration, so a
+    /// write the mouse never received is never reported as done.
+    public var onDPIApplied: ((ManagedDevice, Int) -> Void)?
+
     private let queue = DispatchQueue(label: "\(LoLiLog.subsystem).reconcile", qos: .utility)
     private let stateLock = NSLock()
     private var baselines: [String: Baseline] = [:]
@@ -249,7 +255,7 @@ public final class HardwareReconciler: ObservableObject {
                               key: device.key,
                               highResolution: hardware.highResolutionWheel,
                               inverted: hardware.invertScrollInFirmware), "wheel mode")
-        record(applyDPI(target: target, key: device.key, hardware: hardware), "DPI")
+        record(applyDPI(target: target, device: device, hardware: hardware), "DPI")
         record(applyReportRate(target: target, key: device.key, setting: hardware.reportRate), "report rate")
         record(applyDiversion(target: target, key: device.key, buttons: buttons), "button diversion")
 
@@ -345,9 +351,10 @@ public final class HardwareReconciler: ObservableObject {
 
     private func applyDPI(
         target: HIDPPTarget,
-        key: String,
+        device: ManagedDevice,
         hardware: HardwareSettings
     ) -> Result<Void, HIDPPError> {
+        let key = device.key
         // Presets win when enabled: the active preset is the DPI in force.
         let desired: Int? = hardware.dpiPresets.effective?.active ?? hardware.dpi.effective
 
@@ -361,17 +368,27 @@ public final class HardwareReconciler: ObservableObject {
             return currentResult.map { _ in () }
         }
         captureBaselineIfNeeded(key, current.current, \.dpi)
+        publishDPI(Int(current.current), on: device, applied: false)
 
         guard let desired else {
             guard let baselineDPI = baseline(key)?.dpi else { return .success(()) }
             let result = target.setDPI(baselineDPI)
             mutateBaseline(key) { $0.dpi = nil }
+            if case .success = result { publishDPI(Int(baselineDPI), on: device, applied: false) }
             return result
         }
 
         let value = UInt16(clamping: desired)
-        if current.current == value { return .success(()) }
-        return target.setDPI(value)
+        let result = current.current == value ? .success(()) : target.setDPI(value)
+        if case .success = result { publishDPI(Int(value), on: device, applied: true) }
+        return result
+    }
+
+    private func publishDPI(_ dpi: Int, on device: ManagedDevice, applied: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            device.dpi = dpi
+            if applied { self?.onDPIApplied?(device, dpi) }
+        }
     }
 
     private func applyReportRate(

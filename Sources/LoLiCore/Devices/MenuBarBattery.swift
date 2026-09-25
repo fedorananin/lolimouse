@@ -14,6 +14,12 @@ import HIDPP
 public enum MenuBarBattery {
     public static let separator = " · "
 
+    /// Shown in place of the charge readings for a moment after a DPI preset
+    /// change.
+    public static func label(forDPI dpi: Int) -> String {
+        "\(dpi) DPI"
+    }
+
     public static func label(for battery: HIDPPBattery) -> String? {
         guard let percentage = battery.percentage else { return nil }
         return "\(percentage)%\(battery.charging ? " ⚡" : "")"

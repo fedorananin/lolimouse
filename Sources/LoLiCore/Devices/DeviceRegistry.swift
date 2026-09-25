@@ -55,6 +55,9 @@ public final class ManagedDevice: Identifiable, ObservableObject {
 
     @Published public internal(set) var isOnline: Bool
     @Published public internal(set) var battery: HIDPPBattery?
+    /// The sensor resolution the mouse last reported or accepted, or `nil`
+    /// while unknown. Updated by the reconciler whenever it reads or writes it.
+    @Published public internal(set) var dpi: Int?
     /// Populated lazily on first use, because reading the control table costs a
     /// round trip per row.
     @Published public internal(set) var controls: [HIDPPControlInfo] = []

@@ -25,6 +25,16 @@ public final class AppController: ObservableObject {
     @Published public private(set) var hasInputMonitoring = false
     @Published public private(set) var isRunning = false
 
+    /// A DPI value the mouse has just taken because the user switched preset
+    /// with a button. The menu bar shows it briefly.
+    public let dpiAnnouncements = PassthroughSubject<Int, Never>()
+    /// Devices whose next applied DPI should be announced: the value expected,
+    /// so a pass already under way with the old one is not taken for it, and
+    /// the moment the request stops counting, so a write that failed is not
+    /// announced much later by an unrelated reconnect.
+    private var pendingDPIAnnouncements: [String: (dpi: Int, deadline: Date)] = [:]
+    private static let dpiAnnouncementWindow: TimeInterval = 5
+
     private lazy var router = DivertedButtonRouter(actions: actions)
     private lazy var trackpadGestures = TrackpadGestureController(actions: actions)
     private var eventTap: EventTap?
@@ -53,6 +63,11 @@ public final class AppController: ObservableObject {
     private init() {
         actions.onDeviceAction = { [weak self] action, device in
             self?.performDeviceAction(action, device: device)
+        }
+        reconciler.onDPIApplied = { [weak self] device, dpi in
+            guard let self, let pending = pendingDPIAnnouncements[device.key], pending.dpi == dpi else { return }
+            pendingDPIAnnouncements.removeValue(forKey: device.key)
+            if pending.deadline > Date() { dpiAnnouncements.send(dpi) }
         }
         router.configurationProvider = { [weak self] key in
             self?.store.configuration.device(key) ?? DeviceConfiguration()
@@ -547,11 +562,15 @@ public final class AppController: ObservableObject {
                 return
             }
             configuration.hardware.dpiPresets.value = configuration.hardware.dpiPresets.value.next()
+            announceNextDPI(configuration.hardware.dpiPresets.value.active, for: key)
             store.updateDevice(key) { $0 = configuration }
 
         case let .dpiPreset(index):
-            guard store.configuration.device(key).hardware.dpiPresets.enabled else { return }
-            store.updateDevice(key) { $0.hardware.dpiPresets.value.activeIndex = index }
+            var presets = store.configuration.device(key).hardware.dpiPresets
+            guard presets.enabled else { return }
+            presets.value.activeIndex = index
+            announceNextDPI(presets.value.active, for: key)
+            store.updateDevice(key) { $0.hardware.dpiPresets = presets }
 
         case .toggleWheelRatchet:
             var configuration = store.configuration.device(key)
@@ -569,5 +588,12 @@ public final class AppController: ObservableObject {
         default:
             break
         }
+    }
+
+    /// Set before the configuration changes, because that change is what
+    /// sends the reconciler off to write the new value.
+    private func announceNextDPI(_ dpi: Int?, for key: String) {
+        guard let dpi else { return }
+        pendingDPIAnnouncements[key] = (dpi, Date().addingTimeInterval(Self.dpiAnnouncementWindow))
     }
 }

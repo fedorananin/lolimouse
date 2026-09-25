@@ -32,6 +32,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// the discarded object — the title then froze at the level read during
     /// that scan while the menu, which reads the live device, moved on.
     private var batteryObservations: [ObjectIdentifier: AnyCancellable] = [:]
+    /// A DPI reading that replaces the whole title for a moment after a preset
+    /// change, then gives the charge readings back.
+    private var dpiFlash: String?
+    private var dpiFlashReset: DispatchWorkItem?
+    private static let dpiFlashDuration: TimeInterval = 2
 
     init(controller: AppController, openSettings: @escaping () -> Void) {
         self.controller = controller
@@ -47,6 +52,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         controller.registry.$devices
             .receive(on: DispatchQueue.main)
             .sink { [weak self] devices in self?.observeBatteries(devices) }
+            .store(in: &cancellables)
+
+        controller.dpiAnnouncements
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] dpi in self?.flashDPI(dpi) }
             .store(in: &cancellables)
     }
 
@@ -86,10 +96,30 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// its settings page; see `MenuBarBattery` for the formatting rules.
     private func updateBatteryTitle() {
         guard let button = statusItem?.button else { return }
+        if let dpiFlash {
+            button.title = dpiFlash
+            return
+        }
         let configuration = store.configuration
         button.title = MenuBarBattery.title(for: controller.registry.devices.map { device in
             (shown: configuration.device(device.key).showBatteryInMenuBar, battery: device.battery)
         })
+    }
+
+    // MARK: - DPI
+
+    /// Pressing the button again while a reading is up restarts the timer, so
+    /// the title only goes back once the user stops cycling.
+    private func flashDPI(_ dpi: Int) {
+        dpiFlash = MenuBarBattery.label(forDPI: dpi)
+        dpiFlashReset?.cancel()
+        let reset = DispatchWorkItem { [weak self] in
+            self?.dpiFlash = nil
+            self?.updateBatteryTitle()
+        }
+        dpiFlashReset = reset
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.dpiFlashDuration, execute: reset)
+        updateBatteryTitle()
     }
 
     private func makeStatusItem() -> NSStatusItem {

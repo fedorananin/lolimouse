@@ -137,6 +137,10 @@ suite("Configuration") {
         )
     }
 
+    test("a DPI announcement reads as a plain value with its unit") {
+        expectEqual(MenuBarBattery.label(forDPI: 1200), "1200 DPI")
+    }
+
     test("DPI presets cycle and wrap around") {
         let presets = DPIPresets(values: [800, 1600, 3200], activeIndex: 0)
         expectEqual(presets.active, 800)
