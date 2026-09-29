@@ -19,7 +19,35 @@ final class TrackpadGestureController {
     /// Actions keyed by finger count, for one trackpad.
     private struct Binding {
         let actions: [Int: Action]
+        /// The same, inside each application whose profile is switched on,
+        /// keyed by bundle identifier. A profile that switches every tap off
+        /// is present with no actions, so it still overrides `actions`.
+        let applicationActions: [String: [Int: Action]]
         let device: ManagedDevice
+
+        /// The actions for the application under the pointer. The window
+        /// server is asked only when some profile exists.
+        func actionsUnderPointer() -> [Int: Action] {
+            guard !applicationActions.isEmpty,
+                  let bundleIdentifier = ApplicationUnderPointer.shared.bundleIdentifierUnderPointer(),
+                  let actions = applicationActions[bundleIdentifier]
+            else { return actions }
+            return actions
+        }
+
+        var isEmpty: Bool {
+            actions.isEmpty && applicationActions.values.allSatisfy(\.isEmpty)
+        }
+
+        static func actions(for settings: TrackpadSettings) -> [Int: Action] {
+            var actions: [Int: Action] = [:]
+            for fingers in TrackpadSettings.offeredFingerCounts {
+                if let setting = settings.tap(fingers: fingers), setting.enabled {
+                    actions[fingers] = setting.value
+                }
+            }
+            return actions
+        }
     }
 
     /// Guards everything below; the monitor calls back on its own thread.
@@ -43,15 +71,14 @@ final class TrackpadGestureController {
         var configured: [Binding] = []
         if configuration.enabled {
             for device in devices where device.isTrackpad {
-                let settings = configuration.device(device.key).trackpad
-                var actions: [Int: Action] = [:]
-                for fingers in TrackpadSettings.offeredFingerCounts {
-                    if let setting = settings.tap(fingers: fingers), setting.enabled {
-                        actions[fingers] = setting.value
-                    }
-                }
-                guard !actions.isEmpty else { continue }
-                let binding = Binding(actions: actions, device: device)
+                let deviceConfiguration = configuration.device(device.key)
+                let binding = Binding(
+                    actions: Binding.actions(for: deviceConfiguration.trackpad),
+                    applicationActions: deviceConfiguration.applicationConfigurations
+                        .mapValues { Binding.actions(for: $0.trackpad) },
+                    device: device
+                )
+                guard !binding.isEmpty else { continue }
                 configured.append(binding)
                 if let id = device.multitouchID {
                     bindings[id] = binding
@@ -97,7 +124,7 @@ final class TrackpadGestureController {
         self.detectors[frame.deviceID] = detectors
         lock.unlock()
 
-        guard let tapped, let binding, let action = binding.actions[tapped] else { return }
+        guard let tapped, let binding, let action = binding.actionsUnderPointer()[tapped] else { return }
         os_log("%{public}d-finger tap on %{public}@ → %{public}@",
                log: Self.log, type: .info, tapped, binding.device.displayName, action.displayName)
         DispatchQueue.main.async { [actions] in

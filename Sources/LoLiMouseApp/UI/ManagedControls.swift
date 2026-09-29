@@ -11,27 +11,75 @@ import SwiftUI
 @MainActor
 final class DeviceSettingsModel: ObservableObject {
     let device: ManagedDevice
+    /// The bundle identifier of the application profile being edited, or
+    /// `nil` for the settings that apply everywhere.
+    let application: String?
     private let store: ConfigurationStore
 
-    init(device: ManagedDevice, store: ConfigurationStore) {
+    init(device: ManagedDevice, store: ConfigurationStore, application: String? = nil) {
         self.device = device
         self.store = store
+        self.application = application
     }
 
-    var configuration: DeviceConfiguration {
+    /// The settings for all applications, whatever is being edited.
+    var baseConfiguration: DeviceConfiguration {
         store.configuration.device(device.key)
     }
 
-    /// A binding into this device's configuration.
+    /// The settings as they apply where this model is looking: everywhere, or
+    /// inside one application.
+    var configuration: DeviceConfiguration {
+        let base = baseConfiguration
+        guard let application, let profile = base.apps[application] else { return base }
+        return base.applying(profile)
+    }
+
+    var profile: AppProfile? {
+        application.flatMap { baseConfiguration.apps[$0] }
+    }
+
+    var isEditingProfile: Bool { application != nil }
+
+    /// A binding into this device's configuration. While a profile is being
+    /// edited, whatever a write changes becomes an override in that profile.
     func binding<Value>(_ path: WritableKeyPath<DeviceConfiguration, Value>) -> Binding<Value> {
         Binding(
             get: { self.configuration[keyPath: path] },
             set: { newValue in
                 self.store.updateDevice(self.device.key) { configuration in
-                    configuration[keyPath: path] = newValue
                     configuration.displayName = self.device.displayName
+                    if let application = self.application {
+                        configuration.editProfile(application) { $0[keyPath: path] = newValue }
+                    } else {
+                        configuration[keyPath: path] = newValue
+                    }
                 }
             }
+        )
+    }
+
+    /// Whether a setting differs in the application being edited, or `nil`
+    /// when no profile is being edited or the setting cannot differ per
+    /// application.
+    func override<Value>(_ path: WritableKeyPath<DeviceConfiguration, Setting<Value>>) -> ApplicationOverride? {
+        guard let application, let profile, let setting = OverridableSetting(path: path) else { return nil }
+        return ApplicationOverride(
+            applicationName: profile.name,
+            isAllowed: setting.isAllowed(over: baseConfiguration),
+            isOverridden: Binding(
+                get: { self.profile?.overrides(setting) == true },
+                set: { newValue in
+                    self.store.updateDevice(self.device.key) { configuration in
+                        let base = configuration
+                        if newValue {
+                            configuration.apps[application]?.override(setting, from: base)
+                        } else {
+                            configuration.apps[application]?.inherit(setting)
+                        }
+                    }
+                }
+            )
         )
     }
 
@@ -85,15 +133,61 @@ struct SettingsSection<Content: View>: View {
     }
 }
 
+/// Whether one setting differs inside the application profile being edited.
+struct ApplicationOverride {
+    let applicationName: String
+    /// False for a diverted button that is not taken over for all
+    /// applications — see `OverridableSetting.isAllowed(over:)`.
+    let isAllowed: Bool
+    @Binding var isOverridden: Bool
+}
+
 /// One switchable setting: a toggle that decides whether LoLiMouse manages it,
 /// and the controls that configure it — greyed out while the switch is off.
+///
+/// With an `override`, it is shown as part of an application profile: a
+/// checkbox decides whether the setting differs there, and until it is ticked
+/// the setting shows, read-only, what it inherits.
 struct ManagedSetting<Content: View>: View {
     let title: String
     var help: String?
     @Binding var isManaged: Bool
+    var override: ApplicationOverride?
     @ViewBuilder var content: Content
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let override {
+                overrideToggle(override)
+            }
+            setting
+                .disabled(isInherited)
+                .opacity(isInherited ? 0.55 : 1)
+        }
+    }
+
+    private var isInherited: Bool {
+        guard let override else { return false }
+        return !override.isOverridden
+    }
+
+    @ViewBuilder
+    private func overrideToggle(_ override: ApplicationOverride) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle("Different in \(override.applicationName)", isOn: override.$isOverridden)
+                .toggleStyle(.checkbox)
+                .disabled(!override.isAllowed && !override.isOverridden)
+            if !override.isAllowed {
+                Text("Take this button over under All applications first — whether the mouse "
+                    + "hands it to LoLiMouse cannot change from one window to the next.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var setting: some View {
         VStack(alignment: .leading, spacing: 8) {
             Toggle(isOn: $isManaged) {
                 VStack(alignment: .leading, spacing: 2) {

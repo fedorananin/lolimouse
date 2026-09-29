@@ -33,7 +33,8 @@ struct ButtonsSection: View {
                 title: "Three-finger tap",
                 help: "macOS uses the same tap for Look Up. Turn that off under System Settings › "
                     + "Trackpad › Point & Click, otherwise both will fire.",
-                isManaged: model.enabled(\.trackpad.threeFingerTap)
+                isManaged: model.enabled(\.trackpad.threeFingerTap),
+                override: model.override(\.trackpad.threeFingerTap)
             ) {
                 ActionPicker(label: "Tap", action: model.value(\.trackpad.threeFingerTap))
                     .frame(width: 320)
@@ -44,7 +45,8 @@ struct ButtonsSection: View {
             ManagedSetting(
                 title: "Four-finger tap",
                 help: "macOS has no default for this one, so nothing needs switching off.",
-                isManaged: model.enabled(\.trackpad.fourFingerTap)
+                isManaged: model.enabled(\.trackpad.fourFingerTap),
+                override: model.override(\.trackpad.fourFingerTap)
             ) {
                 ActionPicker(label: "Tap", action: model.value(\.trackpad.fourFingerTap))
                     .frame(width: 320)
@@ -61,9 +63,13 @@ struct ButtonsSection: View {
         ) {
             ManagedSetting(
                 title: "Take over this button",
-                help: "While this is off the button keeps its factory job of toggling the wheel "
-                    + "ratchet, handled inside the mouse.",
-                isManaged: model.enabled(\.buttons.wheelModeButton)
+                help: model.isEditingProfile
+                    ? "Switched off here, the button does nothing in this application. It stays "
+                        + "taken over everywhere else."
+                    : "While this is off the button keeps its factory job of toggling the wheel "
+                        + "ratchet, handled inside the mouse.",
+                isManaged: model.enabled(\.buttons.wheelModeButton),
+                override: model.override(\.buttons.wheelModeButton)
             ) {
                 VStack(alignment: .leading, spacing: 6) {
                     ActionPicker(label: "Press", action: model.value(\.buttons.wheelModeButton))
@@ -91,7 +97,8 @@ struct ButtonsSection: View {
                 title: "Action on press",
                 help: "What a plain press does. Leave the gestures below switched off to make this "
                     + "an ordinary extra button.",
-                isManaged: model.enabled(\.buttons.thumbButton.tap)
+                isManaged: model.enabled(\.buttons.thumbButton.tap),
+                override: model.override(\.buttons.thumbButton.tap)
             ) {
                 ActionPicker(label: "Press", action: model.value(\.buttons.thumbButton.tap))
                     .frame(width: 320)
@@ -103,7 +110,8 @@ struct ButtonsSection: View {
                 title: "Flick gestures",
                 help: "Hold the button and move the mouse. Switch this off and the button stops "
                     + "caring about movement entirely.",
-                isManaged: model.enabled(\.buttons.thumbButton.gestures)
+                isManaged: model.enabled(\.buttons.thumbButton.gestures),
+                override: model.override(\.buttons.thumbButton.gestures)
             ) {
                 gestureEditor
             }
@@ -135,6 +143,8 @@ struct ButtonsSection: View {
                 }
             }
 
+            // How far a flick travels is a feel for the hand, not for the
+            // window, so it is set once for all applications.
             LabelledSlider(
                 label: "Flick distance",
                 value: model.binding(\.buttons.thumbButton.threshold),
@@ -142,6 +152,8 @@ struct ButtonsSection: View {
                 step: 5,
                 format: { String(format: "%.0f", $0) }
             )
+            .disabled(model.isEditingProfile)
+            .help(model.isEditingProfile ? "Set under All applications." : "")
         }
     }
 
@@ -154,7 +166,8 @@ struct ButtonsSection: View {
         ) {
             ManagedSetting(
                 title: "Remap buttons",
-                isManaged: model.enabled(\.buttons.mappings)
+                isManaged: model.enabled(\.buttons.mappings),
+                override: model.override(\.buttons.mappings)
             ) {
                 mappingEditor
             }

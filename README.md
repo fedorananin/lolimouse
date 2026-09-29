@@ -129,6 +129,30 @@ Event handling:
   switch off Look Up under System Settings › Trackpad so it and the
   three-finger tap do not fire together.
 
+Per-application profiles:
+
+- **Scrolling and buttons can differ in one application.** Pick an application
+  at the top of a device's settings and tick "Different in …" on any scrolling
+  or button setting — reverse the wheel only in a video player, say, or give
+  the thumb button a different job in an editor. Everything left unticked
+  follows the settings for all applications, and a profile can switch a
+  setting *off* as well as on.
+- **The application under the pointer decides**, not the frontmost one: macOS
+  sends the wheel to whatever window the pointer is over, even in the
+  background, so that is where the profile has to apply.
+- Only settings that act on events as they happen can differ. DPI, the wheel
+  ratchet and pointer speed live in the mouse or in macOS and stay per device.
+  The wheel-mode and thumb buttons can change their action per application,
+  but only once they are taken over for all applications — whether the mouse
+  hands a button to LoLiMouse cannot change from one window to the next.
+- A keyboard shortcut bound to a button still goes to the *frontmost*
+  application, because macOS delivers keystrokes to keyboard focus. With the
+  pointer over a background window, the profile of that window is chosen, but
+  its shortcut lands in the active one. Posting the keystroke straight to the
+  process under the pointer (`CGEvent.postToPid`) is a possible improvement;
+  some applications ignore keystrokes delivered that way, so it needs trying
+  first.
+
 And the small things:
 
 - **Battery level** in the menu and in the settings window, over HID++. Each
@@ -149,6 +173,22 @@ Bluetooth and it keeps its settings.
 
 The file is plain JSON and safe to edit by hand. A setting that is absent counts
 as switched off, so the file only mentions what you actually turned on.
+
+Application profiles sit inside their device under `apps`, keyed by bundle
+identifier, and list only the settings they change:
+
+```json
+"apps": {
+  "com.colliderli.iina": {
+    "name": "IINA",
+    "enabled": true,
+    "settings": {
+      "scrolling.vertical.reverse": { "enabled": false, "value": true },
+      "scrolling.horizontal.reverse": { "enabled": true, "value": true }
+    }
+  }
+}
+```
 
 ## Building from source
 

@@ -124,6 +124,28 @@ a second confirming time a few seconds later to beat the firmware's own
 start-up, retries with backoff when the device is asleep, and keeps baselines so
 disabling a setting puts the original back.
 
+### Application profiles
+
+`Sources/LoLiCore/Config/AppProfile.swift`. A profile is an overlay on one
+device's settings, keyed by bundle identifier: it lists only the `Setting`s it
+replaces, and replaces each one whole, switch included — so a profile can turn
+a setting off. Only `OverridableSetting` cases can be overridden: settings
+applied per event. Anything written to the mouse or to macOS (DPI, ratchet,
+pointer speed, button diversion) stays per device; a diverted button's action
+can be overridden only while the button is taken over for all applications.
+
+The profile is chosen by the application whose window is under the pointer
+(`ApplicationUnderPointer`, the on-screen window list cached for 50 ms), since
+that is where macOS delivers wheel events. The event snapshot holds a
+precomputed `EventRoute` per device and per enabled profile, and the window
+server is only asked when a device has one.
+
+**Idea for later:** keyboard-shortcut actions are posted to the session and so
+reach the *frontmost* application, even when the profile was chosen for a
+background window under the pointer. `CGEvent.postToPid` to that window's
+owner would fix it, but some applications ignore keystrokes delivered that
+way — try it on real applications before switching.
+
 ### Threading
 
 - Device scanning and all HID++ traffic: background queues. HID++ transactions
@@ -157,7 +179,7 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
   registry through the IORegistry "Multitouch ID" property).
 - Custom actions: a recorded keyboard shortcut, a synthesised double click
   and a synthesised ⌘ + scroll, bound to buttons and thumb gestures.
-- 97 tests pass.
+- 119 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:
@@ -172,6 +194,9 @@ the two reference implementations, never exercised against a real device:
   dynamic `flagsChanged` tap mask
 - Modifier-qualified button mappings (⌘+button → different action)
 - Media/brightness actions (NX system-defined key events)
+- Per-application profiles (`AppProfile`, `ApplicationUnderPointer`): the
+  window-list lookup, and profile switching for scrolling, button mappings,
+  diverted buttons and trackpad taps
 
 Do not describe any of the above as working until it has been seen working.
 

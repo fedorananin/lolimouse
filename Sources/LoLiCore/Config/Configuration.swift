@@ -532,6 +532,9 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
     /// global so that with a mouse and a keyboard the user decides which one
     /// (or both) the menu bar reports.
     public var showBatteryInMenuBar: Bool
+    /// Settings that differ while the pointer is over a particular
+    /// application's window, keyed by bundle identifier. See AppProfile.swift.
+    public var apps: [String: AppProfile]
 
     public init(
         displayName: String? = nil,
@@ -540,7 +543,8 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
         scrolling: ScrollingSettings = ScrollingSettings(),
         buttons: ButtonSettings = ButtonSettings(),
         trackpad: TrackpadSettings = TrackpadSettings(),
-        showBatteryInMenuBar: Bool = false
+        showBatteryInMenuBar: Bool = false,
+        apps: [String: AppProfile] = [:]
     ) {
         self.displayName = displayName
         self.hardware = hardware
@@ -549,6 +553,7 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
         self.buttons = buttons
         self.trackpad = trackpad
         self.showBatteryInMenuBar = showBatteryInMenuBar
+        self.apps = apps
     }
 
     // Fields added after 0.2.1 are optional on the wire so a config.json
@@ -562,18 +567,32 @@ public struct DeviceConfiguration: Codable, Equatable, Sendable {
         buttons = try container.decodeIfPresent(ButtonSettings.self, forKey: .buttons) ?? ButtonSettings()
         trackpad = try container.decodeIfPresent(TrackpadSettings.self, forKey: .trackpad) ?? TrackpadSettings()
         showBatteryInMenuBar = try container.decodeIfPresent(Bool.self, forKey: .showBatteryInMenuBar) ?? false
+        apps = try container.decodeIfPresent([String: AppProfile].self, forKey: .apps) ?? [:]
     }
 
     public var managesAnything: Bool {
         hardware.managesAnything || pointer.managesAnything
             || scrolling.managesAnything || buttons.managesAnything
             || trackpad.managesAnything
+            || apps.values.contains { $0.enabled && !$0.overridden.isEmpty }
     }
 
     /// Whether this device needs the CGEvent tap at all: scrolling settings
-    /// or button remaps. Hardware, pointer and trackpad-gesture settings do
-    /// not go through the tap and must not count here.
+    /// or button remaps, here or in any application profile that is switched
+    /// on. Hardware, pointer and trackpad-gesture settings do not go through
+    /// the tap and must not count here.
     public var usesEventTap: Bool {
+        ownUsesEventTap || applicationConfigurations.values.contains { $0.ownUsesEventTap }
+    }
+
+    /// Whether the tap must also watch `flagsChanged`, because a modifier is
+    /// bound to pinch zoom here or in an application profile.
+    public var wantsFlagsChanged: Bool {
+        scrolling.wantsFlagsChanged
+            || applicationConfigurations.values.contains { $0.scrolling.wantsFlagsChanged }
+    }
+
+    private var ownUsesEventTap: Bool {
         scrolling.managesAnything || buttons.mappings.enabled
     }
 }

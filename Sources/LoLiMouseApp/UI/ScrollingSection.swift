@@ -20,7 +20,8 @@ struct ScrollingSection: View {
                         + "physical click. Works even when another application has switched the "
                         + "high-resolution wheel on behind your back. Applies to the vertical wheel "
                         + "only — the thumbwheel has no clicks and stays smooth.",
-                    isManaged: model.enabled(\.scrolling.normalizeHighResolutionWheel)
+                    isManaged: model.enabled(\.scrolling.normalizeHighResolutionWheel),
+                    override: model.override(\.scrolling.normalizeHighResolutionWheel)
                 ) {
                     Toggle("Enabled", isOn: model.value(\.scrolling.normalizeHighResolutionWheel))
                 }
@@ -34,7 +35,8 @@ struct ScrollingSection: View {
                     title: "Act on modifier keys while scrolling",
                     help: "For example, hold ⌘ and scroll to zoom. The application never sees the "
                         + "modifier itself, so its own shortcuts stay out of the way.",
-                    isManaged: model.enabled(\.scrolling.modifiers)
+                    isManaged: model.enabled(\.scrolling.modifiers),
+                    override: model.override(\.scrolling.modifiers)
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(ModifierKey.allCases, id: \.self) { modifier in
@@ -142,7 +144,8 @@ private struct AxisSettings: View {
         SettingsSection(title: title) {
             ManagedSetting(
                 title: "Reverse direction",
-                isManaged: model.enabled(axis.appending(path: \.reverse))
+                isManaged: model.enabled(axis.appending(path: \.reverse)),
+                override: model.override(axis.appending(path: \.reverse))
             ) {
                 Toggle("Reversed", isOn: model.value(axis.appending(path: \.reverse)))
             }
@@ -153,7 +156,8 @@ private struct AxisSettings: View {
                 title: "Fixed distance per click",
                 help: "Every click scrolls exactly the same amount. This is what makes scrolling "
                     + "linear — with it on, acceleration no longer applies.",
-                isManaged: model.enabled(axis.appending(path: \.distance))
+                isManaged: model.enabled(axis.appending(path: \.distance)),
+                override: model.override(axis.appending(path: \.distance))
             ) {
                 distanceControls
             }
@@ -164,7 +168,8 @@ private struct AxisSettings: View {
                 title: "Acceleration",
                 help: "Above 1, fast flicks travel further than slow ones. Ignored while a fixed "
                     + "distance is in use.",
-                isManaged: model.enabled(axis.appending(path: \.acceleration))
+                isManaged: model.enabled(axis.appending(path: \.acceleration)),
+                override: model.override(axis.appending(path: \.acceleration))
             ) {
                 LabelledSlider(
                     label: "Curve",
@@ -179,7 +184,8 @@ private struct AxisSettings: View {
             ManagedSetting(
                 title: "Speed",
                 help: "A flat multiplier applied on top of everything else.",
-                isManaged: model.enabled(axis.appending(path: \.speed))
+                isManaged: model.enabled(axis.appending(path: \.speed)),
+                override: model.override(axis.appending(path: \.speed))
             ) {
                 LabelledSlider(
                     label: "Multiplier",

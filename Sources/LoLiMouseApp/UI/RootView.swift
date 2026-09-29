@@ -187,24 +187,60 @@ struct DeviceDetailView: View {
     @EnvironmentObject private var store: ConfigurationStore
     @EnvironmentObject private var reconciler: HardwareReconciler
 
+    /// The application profile being edited, or `nil` for all applications.
+    @State private var application: String?
+    @State private var tab: Tab = .wheel
+
+    private enum Tab: Hashable {
+        case wheel, scrolling, pointer, buttons
+
+        /// Only settings that act on events as they happen can differ per
+        /// application; the firmware and pointer tabs belong to the device.
+        var isPerApplication: Bool { self == .scrolling || self == .buttons }
+    }
+
     var body: some View {
-        let model = DeviceSettingsModel(device: device, store: store)
+        // A profile removed elsewhere must not leave the tabs editing nothing.
+        let editing = application.flatMap { store.configuration.device(device.key).apps[$0] == nil ? nil : $0 }
+        let model = DeviceSettingsModel(device: device, store: store, application: editing)
 
         return VStack(spacing: 0) {
             header
             Divider()
-            TabView {
-                ScrollView { WheelSection(model: model).padding(20) }
-                    .tabItem { Label("Wheel", systemImage: "circle.dashed") }
+            ApplicationProfilesBar(device: device, selection: $application)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+            Divider()
+            TabView(selection: tabSelection(editingProfile: editing != nil)) {
+                if editing == nil {
+                    ScrollView { WheelSection(model: model).padding(20) }
+                        .tabItem { Label("Wheel", systemImage: "circle.dashed") }
+                        .tag(Tab.wheel)
+                }
                 ScrollView { ScrollingSection(model: model).padding(20) }
                     .tabItem { Label("Scrolling", systemImage: "arrow.up.and.down") }
-                ScrollView { PointerSection(model: model).padding(20) }
-                    .tabItem { Label("Pointer", systemImage: "cursorarrow") }
+                    .tag(Tab.scrolling)
+                if editing == nil {
+                    ScrollView { PointerSection(model: model).padding(20) }
+                        .tabItem { Label("Pointer", systemImage: "cursorarrow") }
+                        .tag(Tab.pointer)
+                }
                 ScrollView { ButtonsSection(model: model).padding(20) }
                     .tabItem { Label("Buttons", systemImage: "hand.point.up.left") }
+                    .tag(Tab.buttons)
             }
             .padding(.top, 8)
         }
+    }
+
+    /// While a profile is open, a tab it cannot show falls back to Scrolling;
+    /// the choice itself is kept, so going back to All applications returns
+    /// to it.
+    private func tabSelection(editingProfile: Bool) -> Binding<Tab> {
+        Binding(
+            get: { editingProfile && !tab.isPerApplication ? .scrolling : tab },
+            set: { tab = $0 }
+        )
     }
 
     private var header: some View {

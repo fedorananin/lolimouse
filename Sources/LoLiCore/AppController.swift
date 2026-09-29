@@ -44,11 +44,12 @@ public final class AppController: ObservableObject {
     private let snapshotLock = NSLock()
     private var snapshot = EventSnapshot()
 
-    /// One scroll processor per device, so accumulator state is not shared
-    /// between a mouse and a trackball plugged in at the same time.
+    /// One scroll processor per device and application profile, so
+    /// accumulator state is not shared between a mouse and a trackball plugged
+    /// in at the same time. Keyed by `EventRoute.id`.
     private var scrollProcessors: [String: ScrollProcessor] = [:]
-    /// One modifier transformer per device, for the same reason — pinch state
-    /// must not leak between devices.
+    /// One modifier transformer per device and application profile, for the
+    /// same reason — pinch state must not leak between them.
     private var modifierTransformers: [String: ModifierKeyTransformer] = [:]
     /// Only ever touched from the event thread.
     private var swallowedButtons: Set<Int> = []
@@ -70,7 +71,7 @@ public final class AppController: ObservableObject {
             if pending.deadline > Date() { dpiAnnouncements.send(dpi) }
         }
         router.configurationProvider = { [weak self] key in
-            self?.store.configuration.device(key) ?? DeviceConfiguration()
+            self?.configurationUnderPointer(for: key) ?? DeviceConfiguration()
         }
     }
 
@@ -81,6 +82,10 @@ public final class AppController: ObservableObject {
         isRunning = true
 
         refreshPermissions()
+
+        // Created here, on the main thread, rather than lazily by the first
+        // wheel event: it subscribes to NSWorkspace notifications as it starts.
+        _ = ApplicationUnderPointer.shared
 
         registry.onDevicesChanged = { [weak self] devices, arrived in
             self?.devicesChanged(devices, arrived: arrived)
@@ -248,7 +253,7 @@ public final class AppController: ObservableObject {
         // configuration keeps the narrower mask.
         var watched = EventTap.defaultWatchedEvents
         let wantsFlags = configuration.enabled && registry.devices.contains {
-            configuration.device($0.key).scrolling.wantsFlagsChanged
+            configuration.device($0.key).wantsFlagsChanged
         }
         if wantsFlags { watched.append(.flagsChanged) }
 
@@ -303,7 +308,7 @@ public final class AppController: ObservableObject {
             // A modifier was pressed or released. Devices cannot be told apart
             // here (the event comes from the keyboard), so every transformer
             // gets the chance to end its pinch. Never swallowed.
-            for transformer in snapshot.modifierTransformers.values {
+            for transformer in snapshot.modifierTransformers {
                 _ = transformer.process(event, type: type)
             }
             return event
@@ -319,14 +324,14 @@ public final class AppController: ObservableObject {
             noteUnknownSender(of: event)
             return event
         }
+        guard let route = snapshot.routes[key]?.route(at: event.location) else { return event }
 
         var current = event
-        if let transformer = snapshot.modifierTransformers[key] {
+        if let transformer = route.transformer {
             guard let transformed = transformer.process(current, type: .scrollWheel) else { return nil }
             current = transformed
         }
-        guard let processor = snapshot.processors[key] else { return current }
-        return processor.process(current)
+        return route.processor.process(current)
     }
 
     private func handleButton(_ event: CGEvent, type: CGEventType, snapshot: EventSnapshot) -> CGEvent? {
@@ -343,8 +348,9 @@ public final class AppController: ObservableObject {
             noteUnknownSender(of: event)
             return event
         }
-        guard let mapping = ButtonMapping.bestMatch(
-                  in: snapshot.buttonMappings[key] ?? [],
+        guard let route = snapshot.routes[key]?.route(at: event.location),
+              let mapping = ButtonMapping.bestMatch(
+                  in: route.buttonMappings,
                   button: button,
                   held: ModifierKey.held(in: event.flags)
               )
@@ -373,6 +379,43 @@ public final class AppController: ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.registry.rescan() }
     }
 
+    /// What the event pipeline does for one device inside one application,
+    /// or everywhere else.
+    private struct EventRoute {
+        /// `deviceKey` alone, or `deviceKey` and a bundle identifier.
+        var id: String
+        var configuration: DeviceConfiguration
+        var processor: ScrollProcessor
+        var transformer: ModifierKeyTransformer?
+        var buttonMappings: [ButtonMapping]
+    }
+
+    /// A device's routes: the one for all applications, and one per
+    /// application profile that is switched on.
+    private struct DeviceRoutes {
+        var base: EventRoute
+        var applications: [String: EventRoute] = [:]
+
+        /// The route for whatever application owns the window at `point`.
+        /// With no profiles the window server is never asked, so a device
+        /// without them pays nothing for the feature.
+        func route(at point: CGPoint) -> EventRoute {
+            guard !applications.isEmpty,
+                  let bundleIdentifier = ApplicationUnderPointer.shared.bundleIdentifier(at: point),
+                  let route = applications[bundleIdentifier]
+            else { return base }
+            return route
+        }
+
+        func routeUnderPointer() -> EventRoute {
+            guard !applications.isEmpty,
+                  let bundleIdentifier = ApplicationUnderPointer.shared.bundleIdentifierUnderPointer(),
+                  let route = applications[bundleIdentifier]
+            else { return base }
+            return route
+        }
+    }
+
     /// An immutable view of everything the event thread needs, published from
     /// the main thread whenever devices or configuration change.
     private struct EventSnapshot {
@@ -382,9 +425,10 @@ public final class AppController: ObservableObject {
         /// tell us which device produced an event or the sender ID is not one
         /// we know. See `Configuration.soleEventTapDevice(among:)`.
         var soleConfiguredKey: String?
-        var processors: [String: ScrollProcessor] = [:]
-        var modifierTransformers: [String: ModifierKeyTransformer] = [:]
-        var buttonMappings: [String: [ButtonMapping]] = [:]
+        var routes: [String: DeviceRoutes] = [:]
+        /// Every transformer in `routes`, for `flagsChanged`, which cannot be
+        /// attributed to a device or a window.
+        var modifierTransformers: [ModifierKeyTransformer] = []
         var devices: [String: ManagedDevice] = [:]
 
         func deviceKey(for event: CGEvent) -> String? {
@@ -458,38 +502,60 @@ public final class AppController: ObservableObject {
         var processors: [String: ScrollProcessor] = [:]
         var transformers: [String: ModifierKeyTransformer] = [:]
         var senderToKey: [UInt64: String] = [:]
-        var buttonMappings: [String: [ButtonMapping]] = [:]
+        var routes: [String: DeviceRoutes] = [:]
         var deviceMap: [String: ManagedDevice] = [:]
 
-        for device in devices {
-            let deviceConfiguration = configuration.device(device.key)
-
+        func makeRoute(id: String, configuration: DeviceConfiguration, multiplier: Int) -> EventRoute {
             // Reuse the existing processor so accumulator state survives a
             // settings change made in the middle of a scroll.
-            let processor = scrollProcessors[device.key] ?? ScrollProcessor()
-            processor.settings = deviceConfiguration.scrolling
-            processor.highResolutionMultiplier = multiplier(for: device)
-            processors[device.key] = processor
+            let processor = scrollProcessors[id] ?? ScrollProcessor()
+            processor.settings = configuration.scrolling
+            processor.highResolutionMultiplier = multiplier
+            processors[id] = processor
 
             // Same for the modifier transformer: replacing it mid-pinch would
             // strand the gesture without its "ended" event.
-            if let actions = deviceConfiguration.scrolling.modifiers.effective, !actions.isEmpty {
-                let transformer = modifierTransformers[device.key] ?? ModifierKeyTransformer()
-                transformer.actions = actions
-                transformers[device.key] = transformer
-            } else if let existing = modifierTransformers[device.key] {
-                existing.deactivate()
+            var transformer: ModifierKeyTransformer?
+            if let actions = configuration.scrolling.modifiers.effective, !actions.isEmpty {
+                transformer = modifierTransformers[id] ?? ModifierKeyTransformer()
+                transformer?.actions = actions
+                transformers[id] = transformer
             }
+
+            return EventRoute(
+                id: id,
+                configuration: configuration,
+                processor: processor,
+                transformer: transformer,
+                buttonMappings: configuration.buttons.mappings.effective ?? []
+            )
+        }
+
+        for device in devices {
+            let deviceConfiguration = configuration.device(device.key)
+            let multiplier = multiplier(for: device)
+
+            var deviceRoutes = DeviceRoutes(
+                base: makeRoute(id: device.key, configuration: deviceConfiguration, multiplier: multiplier)
+            )
+            for (bundleIdentifier, effective) in deviceConfiguration.applicationConfigurations {
+                deviceRoutes.applications[bundleIdentifier] = makeRoute(
+                    id: device.key + "\u{0}" + bundleIdentifier,
+                    configuration: effective,
+                    multiplier: multiplier
+                )
+            }
+            routes[device.key] = deviceRoutes
 
             for senderID in device.senderIDs {
                 senderToKey[senderID] = device.key
             }
-            if let mappings = deviceConfiguration.buttons.mappings.effective, !mappings.isEmpty {
-                buttonMappings[device.key] = mappings
-            }
             deviceMap[device.key] = device
         }
 
+        for (id, existing) in modifierTransformers where transformers[id] == nil {
+            existing.deactivate()
+        }
         scrollProcessors = processors
         modifierTransformers = transformers
 
@@ -498,12 +564,21 @@ public final class AppController: ObservableObject {
             enabled: configuration.enabled,
             senderToKey: senderToKey,
             soleConfiguredKey: configuration.soleEventTapDevice(among: devices.map(\.key)),
-            processors: processors,
-            modifierTransformers: transformers,
-            buttonMappings: buttonMappings,
+            routes: routes,
+            modifierTransformers: Array(transformers.values),
             devices: deviceMap
         )
         snapshotLock.unlock()
+    }
+
+    /// A device's settings as they apply in the application under the
+    /// pointer right now. For the HID++ button router, which runs on the
+    /// device's own queue and has no event to take a location from.
+    private func configurationUnderPointer(for key: String) -> DeviceConfiguration? {
+        snapshotLock.lock()
+        let routes = snapshot.routes[key]
+        snapshotLock.unlock()
+        return routes?.routeUnderPointer().configuration
     }
 
     /// The wheel's high-resolution multiplier, needed to fold increments back

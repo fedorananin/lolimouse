@@ -197,6 +197,239 @@ suite("Event fallback — a trackpad gesture must not disarm the mouse") {
     }
 }
 
+suite("Application profiles — one app, its own wheel and buttons") {
+    // The case that started it: macOS natural scrolling on, the mouse's
+    // vertical reverse on in LoLiMouse, and IINA undoing natural scrolling a
+    // second time. IINA needs the reverse *off*, and its thumbwheel reversed.
+    var mouse = DeviceConfiguration()
+    mouse.scrolling.vertical.reverse = .on(true)
+    mouse.scrolling.vertical.distance = .on(.lines(3))
+    var iina = AppProfile(name: "IINA")
+    iina.override(.verticalReverse, from: mouse)
+    iina.override(.horizontalReverse, from: mouse)
+    mouse.apps["com.colliderli.iina"] = iina
+    mouse.editProfile("com.colliderli.iina") {
+        $0.scrolling.vertical.reverse.enabled = false
+        $0.scrolling.horizontal.reverse = .on(true)
+    }
+
+    test("an overridden setting is replaced whole, switch included") {
+        guard let effective = mouse.applicationConfigurations["com.colliderli.iina"] else {
+            expect(false, "the profile is on and changes something, so it must apply")
+            return
+        }
+        expectEqual(effective.scrolling.vertical.reverse.enabled, false,
+                    "a profile must be able to switch a setting off")
+        expectEqual(effective.scrolling.horizontal.reverse, .on(true))
+    }
+
+    test("everything not overridden follows the settings for all applications") {
+        var changed = mouse
+        changed.scrolling.vertical.distance = .on(.pixels(40))
+        expectEqual(
+            changed.applicationConfigurations["com.colliderli.iina"]?.scrolling.vertical.distance,
+            .on(.pixels(40))
+        )
+    }
+
+    test("the effective configuration carries no profiles of its own") {
+        expectEqual(mouse.applicationConfigurations["com.colliderli.iina"]?.apps.isEmpty, true)
+    }
+
+    test("a profile that is switched off, or changes nothing, does not apply") {
+        var off = mouse
+        off.apps["com.colliderli.iina"]?.enabled = false
+        expect(off.applicationConfigurations.isEmpty)
+
+        var empty = DeviceConfiguration()
+        empty.apps["com.apple.Safari"] = AppProfile(name: "Safari")
+        expect(empty.applicationConfigurations.isEmpty)
+        expectEqual(empty.managesAnything, false)
+    }
+
+    test("editing records only what changed") {
+        var device = DeviceConfiguration()
+        device.apps["app"] = AppProfile(name: "App")
+        device.editProfile("app") { $0.scrolling.horizontal.speed = .on(2) }
+        expectEqual(device.apps["app"]?.overridden, [.horizontalSpeed])
+
+        // The flick threshold is not a per-application setting; an edit to it
+        // through a profile must not leak into anything.
+        device.editProfile("app") { $0.buttons.thumbButton.threshold = 150 }
+        expectEqual(device.apps["app"]?.overridden, [.horizontalSpeed])
+        expectEqual(device.applicationConfigurations["app"]?.buttons.thumbButton.threshold, 60)
+    }
+
+    test("editing a device without that profile changes nothing") {
+        var device = DeviceConfiguration()
+        device.editProfile("missing") { $0.scrolling.vertical.reverse = .on(true) }
+        expectEqual(device, DeviceConfiguration())
+    }
+
+    test("inheriting again drops the override") {
+        var profile = iina
+        profile.inherit(.horizontalReverse)
+        expectEqual(profile.overridden, [.verticalReverse])
+    }
+
+    test("a diverted button can be changed per app only if it is taken over for all") {
+        var device = DeviceConfiguration()
+        var profile = AppProfile(name: "App")
+        profile.override(.wheelModeButton, from: DeviceConfiguration(buttons: ButtonSettings(
+            wheelModeButton: .on(.missionControl)
+        )))
+        profile.override(.thumbButtonTap, from: DeviceConfiguration(buttons: ButtonSettings(
+            thumbButton: GestureButtonSettings(tap: .on(.showDesktop))
+        )))
+        device.apps["app"] = profile
+        let untouched = device.applying(profile)
+        expectEqual(untouched.buttons.wheelModeButton.enabled, false,
+                    "the button is the firmware's everywhere else, so no profile may divert it")
+        expectEqual(untouched.buttons.thumbButton.tap.enabled, false)
+        expectEqual(untouched.buttons.divertedControls, [])
+
+        device.buttons.wheelModeButton = .on(.cycleDPIPresets)
+        device.buttons.thumbButton.tap = .on(.missionControl)
+        let allowed = device.applying(profile)
+        expectEqual(allowed.buttons.wheelModeButton, .on(.missionControl))
+        expectEqual(allowed.buttons.thumbButton.tap, .on(.showDesktop))
+    }
+
+    test("a disallowed edit is not recorded") {
+        var device = DeviceConfiguration()
+        device.apps["app"] = AppProfile(name: "App")
+        device.editProfile("app") { $0.buttons.wheelModeButton = .on(.missionControl) }
+        expectEqual(device.apps["app"]?.overridden, [])
+    }
+
+    test("a profile brings in the event tap even when the device alone would not") {
+        var device = DeviceConfiguration()
+        expectEqual(device.usesEventTap, false)
+        var profile = AppProfile(name: "App")
+        var reversed = DeviceConfiguration()
+        reversed.scrolling.vertical.reverse = .on(true)
+        profile.override(.verticalReverse, from: reversed)
+        device.apps["app"] = profile
+        expectEqual(device.usesEventTap, true)
+
+        device.apps["app"]?.enabled = false
+        expectEqual(device.usesEventTap, false)
+    }
+
+    test("pinch zoom in a profile asks for flagsChanged") {
+        var device = DeviceConfiguration()
+        var pinch = DeviceConfiguration()
+        pinch.scrolling.modifiers = .on([.command: .pinchZoom])
+        var profile = AppProfile(name: "App")
+        profile.override(.scrollModifiers, from: pinch)
+        expectEqual(device.wantsFlagsChanged, false)
+        device.apps["app"] = profile
+        expectEqual(device.wantsFlagsChanged, true)
+    }
+
+    test("the file names only what the profile changes") {
+        guard let data = try? JSONEncoder().encode(iina),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let settings = object["settings"] as? [String: Any]
+        else {
+            expect(false, "encoding failed")
+            return
+        }
+        expectEqual(Set(settings.keys), ["scrolling.vertical.reverse", "scrolling.horizontal.reverse"])
+        expectEqual(object["name"] as? String, "IINA")
+    }
+
+    test("profiles round-trip through JSON") {
+        guard let data = try? JSONEncoder().encode(mouse),
+              let decoded = try? JSONDecoder().decode(DeviceConfiguration.self, from: data)
+        else {
+            expect(false, "round trip failed")
+            return
+        }
+        expectEqual(decoded, mouse)
+        expectEqual(decoded.applicationConfigurations, mouse.applicationConfigurations)
+    }
+
+    test("a setting a newer version knows about is skipped, not fatal") {
+        let json = Data(#"""
+        {"name": "App", "settings": {
+            "scrolling.vertical.reverse": {"enabled": true, "value": true},
+            "scrolling.somethingNew": {"enabled": true, "value": 1}
+        }}
+        """#.utf8)
+        guard let profile = try? JSONDecoder().decode(AppProfile.self, from: json) else {
+            expect(false, "decoding failed")
+            return
+        }
+        expectEqual(profile.overridden, [.verticalReverse])
+        expectEqual(profile.enabled, true, "a profile without the key is on")
+    }
+
+    test("a device written before profiles existed has none") {
+        let json = Data(#"{"displayName": "MX Master 3S", "showBatteryInMenuBar": true}"#.utf8)
+        expectEqual((try? JSONDecoder().decode(DeviceConfiguration.self, from: json))?.apps.isEmpty, true)
+    }
+
+    test("the values of settings not overridden do not make profiles differ") {
+        var a = AppProfile(name: "App")
+        a.override(.verticalSpeed, from: DeviceConfiguration())
+        a.inherit(.verticalSpeed)
+        expectEqual(a, AppProfile(name: "App"))
+    }
+
+    test("a key path built by appending finds the same setting as a literal one") {
+        let axis: WritableKeyPath<DeviceConfiguration, AxisScrolling> = \.scrolling.horizontal
+        expectEqual(OverridableSetting(path: axis.appending(path: \.reverse)), .horizontalReverse)
+        expectEqual(OverridableSetting(path: \DeviceConfiguration.trackpad.fourFingerTap), .fourFingerTap)
+        expectNil(OverridableSetting(path: \DeviceConfiguration.hardware.dpi),
+                  "hardware settings are never per application")
+    }
+}
+
+suite("Application under the pointer — whose window the wheel lands in") {
+    typealias Window = ApplicationUnderPointer.Window
+    let point = CGPoint(x: 100, y: 100)
+    let covering = CGRect(x: 0, y: 0, width: 500, height: 500)
+
+    test("the frontmost window containing the point wins") {
+        let windows = [
+            Window(ownerPID: 1, bounds: CGRect(x: 300, y: 300, width: 50, height: 50)),
+            Window(ownerPID: 2, bounds: covering),
+            Window(ownerPID: 3, bounds: covering),
+        ]
+        expectEqual(ApplicationUnderPointer.owner(at: point, in: windows), 2)
+    }
+
+    test("the menu bar and the Dock belong to nobody's profile") {
+        let windows = [
+            Window(ownerPID: 1, bounds: covering, layer: 25),
+            Window(ownerPID: 2, bounds: covering, layer: 20),
+            Window(ownerPID: 3, bounds: covering),
+        ]
+        expectEqual(ApplicationUnderPointer.owner(at: point, in: windows), 3)
+    }
+
+    test("a floating window, like IINA's picture in picture, counts") {
+        let windows = [
+            Window(ownerPID: 1, bounds: covering, layer: 3),
+            Window(ownerPID: 2, bounds: covering),
+        ]
+        expectEqual(ApplicationUnderPointer.owner(at: point, in: windows), 1)
+    }
+
+    test("an invisible window is looked through") {
+        let windows = [
+            Window(ownerPID: 1, bounds: covering, alpha: 0),
+            Window(ownerPID: 2, bounds: covering),
+        ]
+        expectEqual(ApplicationUnderPointer.owner(at: point, in: windows), 2)
+    }
+
+    test("over the desktop there is no application") {
+        expectNil(ApplicationUnderPointer.owner(at: point, in: []))
+    }
+}
+
 suite("Wheel ratchet — the setting Logitech does not offer") {
     test("always-ratchet sends the permanent sentinel") {
         let setting = WheelRatchetSetting(mode: .alwaysRatchet, threshold: 16)
