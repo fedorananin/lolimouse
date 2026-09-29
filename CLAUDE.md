@@ -155,7 +155,9 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
 - Three- and four-finger taps on the built-in trackpad (`MultitouchMonitor`,
   private MultitouchSupport framework resolved with `dlsym`; pairing with the
   registry through the IORegistry "Multitouch ID" property).
-- 84 tests pass.
+- Custom actions: a recorded keyboard shortcut, a synthesised double click
+  and a synthesised ⌘ + scroll, bound to buttons and thumb gestures.
+- 97 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:

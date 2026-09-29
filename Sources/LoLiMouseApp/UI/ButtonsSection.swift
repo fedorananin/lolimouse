@@ -116,7 +116,7 @@ struct ButtonsSection: View {
 
         VStack(alignment: .leading, spacing: 8) {
             ForEach(GestureDirection.allCases, id: \.self) { direction in
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
                     Text(direction.displayName)
                         .frame(width: 90, alignment: .leading)
                     ActionPicker(
@@ -173,7 +173,10 @@ struct ButtonsSection: View {
             }
 
             ForEach(Array(mappings.wrappedValue.enumerated()), id: \.element.id) { index, mapping in
-                HStack {
+                // Aligned on the first line, so a custom action's editor
+                // growing underneath the picker leaves the row's controls
+                // where they were.
+                HStack(alignment: .firstTextBaseline) {
                     Stepper(value: Binding(
                         get: { mapping.button },
                         set: { newValue in
@@ -232,30 +235,6 @@ struct ButtonsSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-/// Compact ⌘⇧⌥⌃ toggles for one mapping's required modifiers.
-private struct ModifierToggles: View {
-    @Binding var modifiers: Set<ModifierKey>
-
-    private static let symbols: [(ModifierKey, String)] = [
-        (.control, "⌃"), (.option, "⌥"), (.shift, "⇧"), (.command, "⌘"),
-    ]
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Self.symbols, id: \.0) { modifier, symbol in
-                Toggle(symbol, isOn: Binding(
-                    get: { modifiers.contains(modifier) },
-                    set: { held in
-                        if held { modifiers.insert(modifier) } else { modifiers.remove(modifier) }
-                    }
-                ))
-                .toggleStyle(.button)
-                .help("Fire only while \(modifier.displayName) is held")
-            }
         }
     }
 }

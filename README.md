@@ -117,6 +117,11 @@ Event handling:
   the same button can do one thing plain and another with ⌘ held.
 - **Media and hardware keys as actions** — volume, mute, play/pause, track
   skipping and display brightness can all be bound to buttons and gestures.
+- **Custom shortcuts and mouse actions** — anything that can be bound to an
+  action can also send a recorded keyboard shortcut (⌘R on the thumb button,
+  say), a click, double-click or triple-click of any mouse button, or a turn
+  of the wheel, each with optional modifier keys held: a middle click that
+  double-clicks, or a thumb-button flick down that sends ⌘ + scroll down.
 
 - **Three- and four-finger taps on the trackpad** — the built-in one or an
   external one. Tap with three fingers and get a middle click, with four and

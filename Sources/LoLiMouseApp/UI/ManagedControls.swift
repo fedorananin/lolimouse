@@ -136,26 +136,3 @@ struct LabelledSlider: View {
         }
     }
 }
-
-/// A picker over the actions a button or gesture can trigger.
-struct ActionPicker: View {
-    let label: String
-    @Binding var action: Action
-
-    var body: some View {
-        Picker(label, selection: $action) {
-            ForEach(Action.simpleChoices, id: \.self) { choice in
-                Text(choice.displayName).tag(choice)
-            }
-            // Keep a configured shortcut selectable even though it is not one
-            // of the fixed choices.
-            if case .keyPress = action {
-                Text(action.displayName).tag(action)
-            }
-            if case .mouseButton = action {
-                Text(action.displayName).tag(action)
-            }
-        }
-        .pickerStyle(.menu)
-    }
-}

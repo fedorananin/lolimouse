@@ -68,7 +68,13 @@ public final class ActionRunner {
             postKey(combo)
 
         case let .mouseButton(button):
-            postMouseButton(button)
+            post(Self.clickEvents(MouseClick(button: button), at: currentPointerLocation()))
+
+        case let .mouseClick(click):
+            post(Self.clickEvents(click, at: currentPointerLocation()))
+
+        case let .scroll(step):
+            post(Self.scrollEvents(step))
 
         case let .launchApp(bundleID):
             launch(bundleID)
@@ -122,21 +128,95 @@ public final class ActionRunner {
     // MARK: - Synthesis
 
     private func postKey(_ combo: KeyCombo) {
+        post(Self.keyEvents(combo))
+    }
+
+    /// Everything below builds events without posting them, so the tests can
+    /// check exactly what would be sent.
+    ///
+    /// Flags are set outright rather than merged with what is physically held.
+    /// A mapping that fires only with ⌘ down would otherwise turn a configured
+    /// ⌥-click into ⌥⌘-click.
+    public static func keyEvents(_ combo: KeyCombo) -> [CGEvent] {
         let source = CGEventSource(stateID: .hidSystemState)
 
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: combo.keyCode, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: combo.keyCode, keyDown: false)
         else {
-            return
+            return []
         }
 
-        down.flags = combo.flags
-        up.flags = combo.flags
-        down.markSynthetic()
-        up.markSynthetic()
+        let flags = combo.flags.union(combo.intrinsicFlags)
+        down.flags = flags
+        up.flags = flags
+        return [down, up]
+    }
 
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+    /// A click, or a double or triple click, as a run of down/up pairs.
+    ///
+    /// What makes it a double click is the click-state field — 1 on the first
+    /// pair, 2 on the second — which is what AppKit reports as `clickCount`.
+    /// Timing does not enter into it: the events are posted back to back, and
+    /// counting is left to whoever reads that field.
+    public static func clickEvents(_ click: MouseClick, at location: CGPoint) -> [CGEvent] {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let button = max(click.button, 0)
+
+        let (downType, upType): (CGEventType, CGEventType)
+        switch button {
+        case 0: (downType, upType) = (.leftMouseDown, .leftMouseUp)
+        case 1: (downType, upType) = (.rightMouseDown, .rightMouseUp)
+        default: (downType, upType) = (.otherMouseDown, .otherMouseUp)
+        }
+        let cgButton = CGMouseButton(rawValue: UInt32(button)) ?? .center
+        let flags = click.modifiers.reduce(CGEventFlags()) { $0.union($1.flag) }
+
+        var events: [CGEvent] = []
+        for clickState in 1 ... min(max(click.count, 1), MouseClick.maximumCount) {
+            for type in [downType, upType] {
+                guard let event = CGEvent(mouseEventSource: source, mouseType: type,
+                                          mouseCursorPosition: location, mouseButton: cgButton)
+                else { return [] }
+                // `mouseButton` only decides the event type for buttons 0 and
+                // 1; for the rest the number has to be written explicitly.
+                event.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button))
+                event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
+                event.flags = flags
+                events.append(event)
+            }
+        }
+        return events
+    }
+
+    /// One wheel event in line units, as a notched mouse wheel would send.
+    public static func scrollEvents(_ step: ScrollStep) -> [CGEvent] {
+        let deltas = step.wheelDeltas
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: CGEventSource(stateID: .hidSystemState),
+            units: .line,
+            wheelCount: 2,
+            wheel1: deltas.vertical,
+            wheel2: deltas.horizontal,
+            wheel3: 0
+        ) else {
+            return []
+        }
+        event.flags = step.modifiers.reduce(CGEventFlags()) { $0.union($1.flag) }
+        return [event]
+    }
+
+    /// Marks every event as ours, so the tap lets it through untouched — a
+    /// middle click turned into a double click must not come back round and
+    /// be remapped again — and posts them in order.
+    private func post(_ events: [CGEvent]) {
+        for event in events {
+            event.markSynthetic()
+            event.post(tap: .cghidEventTap)
+        }
+    }
+
+    private func currentPointerLocation() -> CGPoint {
+        CGEvent(source: nil)?.location ?? .zero
     }
 
     private func postSystemKey(_ key: SystemKey) {
@@ -164,33 +244,6 @@ public final class ActionRunner {
 
         post(down: true)
         post(down: false)
-    }
-
-    private func postMouseButton(_ button: Int) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let location = CGEvent(source: nil)?.location ?? .zero
-
-        let (downType, upType): (CGEventType, CGEventType)
-        switch button {
-        case 0: (downType, upType) = (.leftMouseDown, .leftMouseUp)
-        case 1: (downType, upType) = (.rightMouseDown, .rightMouseUp)
-        default: (downType, upType) = (.otherMouseDown, .otherMouseUp)
-        }
-
-        let cgButton = CGMouseButton(rawValue: UInt32(max(button, 0))) ?? .center
-
-        guard let down = CGEvent(mouseEventSource: source, mouseType: downType,
-                                 mouseCursorPosition: location, mouseButton: cgButton),
-              let up = CGEvent(mouseEventSource: source, mouseType: upType,
-                               mouseCursorPosition: location, mouseButton: cgButton)
-        else {
-            return
-        }
-
-        down.markSynthetic()
-        up.markSynthetic()
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
     }
 
     private func launch(_ bundleID: String) {

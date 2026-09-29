@@ -964,4 +964,105 @@ suite("Diverted button subscriptions — a rescan must not leave a dead one behi
     }
 }
 
+// MARK: - Custom actions
+
+suite("Custom actions — shortcuts, clicks and scrolls") {
+    func roundTrip(_ action: Action) -> Action? {
+        guard let data = try? JSONEncoder().encode(action) else { return nil }
+        return try? JSONDecoder().decode(Action.self, from: data)
+    }
+
+    test("custom actions round-trip through JSON") {
+        let actions: [Action] = [
+            .keyPress(KeyCombo(keyCode: 0x0F, command: true)),
+            .mouseClick(MouseClick(button: 0, count: 2, modifiers: [.command, .shift])),
+            .scroll(ScrollStep(direction: .down, lines: 5, modifiers: [.command])),
+        ]
+        for action in actions {
+            expectEqual(roundTrip(action), action)
+        }
+    }
+
+    test("a legacy mouse-button action still decodes") {
+        let json = Data(#"{"mouseButton":{"_0":2}}"#.utf8)
+        expectEqual(try? JSONDecoder().decode(Action.self, from: json), .mouseButton(2))
+    }
+
+    test("shortcuts read the way macOS prints them") {
+        expectEqual(KeyCombo(keyCode: 0x0F, command: true).displayString, "⌘R")
+        expectEqual(KeyCombo(keyCode: 0x11, command: true, shift: true).displayString, "⇧⌘T")
+        expectEqual(KeyCombo(keyCode: 0x7B, control: true).displayString, "⌃←")
+        expectEqual(KeyCombo(keyCode: 0x60).displayString, "F5")
+    }
+
+    test("arrows and function keys carry the flags a real keyboard adds") {
+        // The "move a space left" system hotkey is ⌃ + fn + ←; without the
+        // intrinsic flags a synthesised ⌃← does not match it.
+        let left = KeyCombo(keyCode: 0x7B, control: true)
+        expect(left.intrinsicFlags.contains(.maskSecondaryFn))
+        expect(left.intrinsicFlags.contains(.maskNumericPad))
+        expect(KeyCombo(keyCode: 0x60).intrinsicFlags.contains(.maskSecondaryFn), "F5")
+        expectEqual(KeyCombo(keyCode: 0x0F, command: true).intrinsicFlags, [], "a letter has none")
+    }
+
+    test("a shortcut is one down and one up with exactly its flags") {
+        let events = ActionRunner.keyEvents(KeyCombo(keyCode: 0x0F, command: true))
+        expectEqual(events.map(\.type), [.keyDown, .keyUp])
+        for event in events {
+            expectEqual(event.getIntegerValueField(.keyboardEventKeycode), 0x0F)
+            expect(event.flags.contains(.maskCommand))
+            expect(!event.flags.contains(.maskShift))
+        }
+    }
+
+    test("a double click is two down/up pairs counted 1 then 2") {
+        let click = MouseClick(button: 0, count: 2)
+        let events = ActionRunner.clickEvents(click, at: CGPoint(x: 10, y: 20))
+        expectEqual(events.map(\.type), [.leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp])
+        expectEqual(events.map { $0.getIntegerValueField(.mouseEventClickState) }, [1, 1, 2, 2])
+        expectEqual(events.first?.location, CGPoint(x: 10, y: 20))
+    }
+
+    test("a modified middle click keeps its button number and flags") {
+        let click = MouseClick(button: 2, count: 1, modifiers: [.command])
+        let events = ActionRunner.clickEvents(click, at: .zero)
+        expectEqual(events.map(\.type), [.otherMouseDown, .otherMouseUp])
+        for event in events {
+            expectEqual(event.getIntegerValueField(.mouseEventButtonNumber), 2)
+            expect(event.flags.contains(.maskCommand))
+        }
+    }
+
+    test("the click count is clamped to a triple click") {
+        let events = ActionRunner.clickEvents(MouseClick(button: 1, count: 9), at: .zero)
+        expectEqual(events.count, 6)
+        expectEqual(events.first?.type, .rightMouseDown)
+    }
+
+    test("scroll directions map onto CoreGraphics' wheel axes") {
+        expectEqual(ScrollStep(direction: .up, lines: 3).wheelDeltas.vertical, 3)
+        expectEqual(ScrollStep(direction: .down, lines: 3).wheelDeltas.vertical, -3)
+        expectEqual(ScrollStep(direction: .left, lines: 2).wheelDeltas.horizontal, 2)
+        expectEqual(ScrollStep(direction: .right, lines: 2).wheelDeltas.horizontal, -2)
+        expectEqual(ScrollStep(direction: .down, lines: 3).wheelDeltas.horizontal, 0)
+    }
+
+    test("⌘ + scroll down is one line-unit wheel event carrying ⌘") {
+        let events = ActionRunner.scrollEvents(ScrollStep(direction: .down, lines: 1, modifiers: [.command]))
+        expectEqual(events.count, 1)
+        guard let event = events.first else { return }
+        expectEqual(event.type, .scrollWheel)
+        expectEqual(ScrollWheelEvent(event).deltaY, -1)
+        expect(event.flags.contains(.maskCommand))
+    }
+
+    test("custom actions have readable names") {
+        expectEqual(Action.mouseClick(MouseClick(button: 0, count: 2)).displayName, "Left double-click")
+        expectEqual(
+            Action.scroll(ScrollStep(direction: .down, lines: 1, modifiers: [.command])).displayName,
+            "⌘ scroll down 1 line"
+        )
+    }
+}
+
 report()
