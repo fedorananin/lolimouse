@@ -21,6 +21,8 @@ public final class ActionRunner {
     /// Actions that need a device to act on are handed back to the app.
     public var onDeviceAction: ((Action, ManagedDevice?) -> Void)?
 
+    private let windows = WindowActions()
+
     public init() {}
 
     /// Runs `action`. Returns `false` for `.passthrough`, meaning the caller
@@ -65,10 +67,15 @@ public final class ActionRunner {
             postKey(KeyCombo(keyCode: 0x1B, command: true)) // ⌘-
 
         case .minimizeWindow:
-            minimizeFrontWindow()
+            windows.minimizeFrontWindow { [self] in
+                postKey(KeyCombo(keyCode: 0x2E, command: true)) // ⌘M
+            }
 
         case .hideApplication:
-            hideFrontApplication()
+            windows.hideFrontApplication()
+
+        case .restoreMinimizedOrHidden:
+            windows.restoreLast()
 
         case let .keyPress(combo):
             postKey(combo)
@@ -250,59 +257,6 @@ public final class ActionRunner {
 
         post(down: true)
         post(down: false)
-    }
-
-    // MARK: - Windows
-
-    /// Accessibility calls are messages to another process and wait for its
-    /// answer. `run` is called from the event tap's thread among others, and
-    /// a tap whose owner answers slowly gets disabled — so they wait here.
-    private static let windowQueue = DispatchQueue(label: "me.fedorananin.LoLiMouse.windows", qos: .userInitiated)
-
-    /// Minimises the focused window of the frontmost application.
-    ///
-    /// Through Accessibility rather than by sending ⌘M: the shortcut is the
-    /// application's own menu item, and plenty of applications have none or
-    /// have given the key to something else. ⌘M remains the fallback for an
-    /// application that does not say which of its windows has the focus.
-    private func minimizeFrontWindow() {
-        DispatchQueue.main.async { [self] in
-            guard let application = NSWorkspace.shared.frontmostApplication else { return }
-            let pid = application.processIdentifier
-            Self.windowQueue.async { [self] in
-                let element = AXUIElementCreateApplication(pid)
-                // A hung application must not hold the queue for the default
-                // six seconds.
-                AXUIElementSetMessagingTimeout(element, 1)
-
-                var focused: CFTypeRef?
-                let found = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &focused)
-                guard found == .success, let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else {
-                    os_log("no focused window from pid %d (AX error %d); sending ⌘M",
-                           log: Self.log, type: .info, pid, found.rawValue)
-                    postKey(KeyCombo(keyCode: 0x2E, command: true)) // ⌘M
-                    return
-                }
-                // The type ID was checked above; CoreFoundation types have no
-                // conditional cast.
-                let window = focused as! AXUIElement
-                let result = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
-                if result != .success {
-                    os_log("could not minimise the window of pid %d (AX error %d)",
-                           log: Self.log, type: .error, pid, result.rawValue)
-                }
-            }
-        }
-    }
-
-    private func hideFrontApplication() {
-        DispatchQueue.main.async {
-            guard let application = NSWorkspace.shared.frontmostApplication else { return }
-            if !application.hide() {
-                os_log("%{public}@ refused to hide", log: Self.log, type: .error,
-                       application.localizedName ?? "the frontmost application")
-            }
-        }
     }
 
     private func launch(_ bundleID: String) {

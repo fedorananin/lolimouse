@@ -1254,10 +1254,46 @@ suite("Finger swipes — every finger moving the same way, once per touch") {
         expectEqual(watch.shouldLook(fingerCount: 4), true, "four fingers landing at once")
     }
 
+    test("what was sent away last comes back first") {
+        typealias Entry = RestoreHistory<Int>.Entry
+        var history = RestoreHistory<Int>()
+        history.record(.window(10, 1))
+        history.record(.application(20))
+        history.record(.window(10, 2))
+        expectEqual(history.takeLast(), .window(10, 2))
+        expectEqual(history.takeLast(), .application(20))
+        expectEqual(history.takeLast(), .window(10, 1))
+        expectNil(history.takeLast(), "nothing left")
+    }
+
+    test("something sent away twice is remembered once, at its latest place") {
+        var history = RestoreHistory<Int>()
+        history.record(.application(20))
+        history.record(.window(10, 1))
+        history.record(.application(20))
+        expectEqual(history.entries, [.window(10, 1), .application(20)])
+    }
+
+    test("an application that quits takes its windows out of the history") {
+        var history = RestoreHistory<Int>()
+        history.record(.window(10, 1))
+        history.record(.application(20))
+        history.record(.application(10))
+        history.forget(pid: 10)
+        expectEqual(history.entries, [.application(20)])
+    }
+
+    test("the history keeps only the newest entries") {
+        var history = RestoreHistory<Int>(capacity: 3)
+        for window in 1 ... 5 { history.record(.window(10, window)) }
+        expectEqual(history.entries, [.window(10, 3), .window(10, 4), .window(10, 5)])
+    }
+
     test("the window actions have names and survive JSON") {
         expectEqual(Action.minimizeWindow.displayName, "Minimise window")
         expectEqual(Action.hideApplication.displayName, "Hide application")
-        for action in [Action.minimizeWindow, .hideApplication] {
+        expectEqual(Action.restoreMinimizedOrHidden.displayName, "Restore last minimised or hidden")
+        for action in [Action.minimizeWindow, .hideApplication, .restoreMinimizedOrHidden] {
             let data = try? JSONEncoder().encode(action)
             expectEqual(data.flatMap { try? JSONDecoder().decode(Action.self, from: $0) }, action)
             expect(Action.simpleChoices.contains(action), "\(action.displayName) is offered in the menu")

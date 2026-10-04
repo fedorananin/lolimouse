@@ -235,6 +235,9 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
     case minimizeWindow
     /// Hide the frontmost application, as ⌘H does.
     case hideApplication
+    /// Bring back the window or application that was minimised or hidden
+    /// last, and still is. Repeating it walks further back.
+    case restoreMinimizedOrHidden
 
     /// Send a keyboard shortcut.
     case keyPress(KeyCombo)
@@ -285,6 +288,7 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
         case .zoomOut: return "Zoom out"
         case .minimizeWindow: return "Minimise window"
         case .hideApplication: return "Hide application"
+        case .restoreMinimizedOrHidden: return "Restore last minimised or hidden"
         case let .keyPress(combo): return "Keyboard shortcut \(combo.displayString)"
         case let .mouseButton(button): return "Mouse button \(button + 1)"
         case let .mouseClick(click): return click.displayName.capitalizingFirstLetter
@@ -312,7 +316,7 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
             .spaceLeft, .spaceRight,
             .back, .forward,
             .zoomIn, .zoomOut,
-            .minimizeWindow, .hideApplication,
+            .minimizeWindow, .hideApplication, .restoreMinimizedOrHidden,
             .volumeUp, .volumeDown, .mute,
             .playPause, .mediaNext, .mediaPrevious,
             .brightnessUp, .brightnessDown,

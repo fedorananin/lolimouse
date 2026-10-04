@@ -138,7 +138,11 @@ Event handling:
   While Mission Control or App Exposé is open the swipes stand aside, so
   swiping the overview away does nothing else.
 - **Window actions** — minimise the window in front or hide the application
-  in front, from any button or gesture.
+  in front, from any button or gesture, and bring back whichever was sent
+  away last. Repeating the restore walks further back. Applications hidden
+  with ⌘H come back too; of minimised windows, only those LoLiMouse minimised
+  are remembered, with a minimised window of the application in front as the
+  fallback.
 
 Per-application profiles:
 
