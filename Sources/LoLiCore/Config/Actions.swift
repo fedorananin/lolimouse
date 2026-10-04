@@ -231,6 +231,11 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
     case zoomIn
     case zoomOut
 
+    /// Minimise the frontmost application's focused window into the Dock.
+    case minimizeWindow
+    /// Hide the frontmost application, as ⌘H does.
+    case hideApplication
+
     /// Send a keyboard shortcut.
     case keyPress(KeyCombo)
     /// Send a plain mouse button, 0-based as CoreGraphics numbers them.
@@ -278,6 +283,8 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
         case .forward: return "Forward"
         case .zoomIn: return "Zoom in"
         case .zoomOut: return "Zoom out"
+        case .minimizeWindow: return "Minimise window"
+        case .hideApplication: return "Hide application"
         case let .keyPress(combo): return "Keyboard shortcut \(combo.displayString)"
         case let .mouseButton(button): return "Mouse button \(button + 1)"
         case let .mouseClick(click): return click.displayName.capitalizingFirstLetter
@@ -305,6 +312,7 @@ public enum Action: Codable, Equatable, Hashable, Sendable {
             .spaceLeft, .spaceRight,
             .back, .forward,
             .zoomIn, .zoomOut,
+            .minimizeWindow, .hideApplication,
             .volumeUp, .volumeDown, .mute,
             .playPause, .mediaNext, .mediaPrevious,
             .brightnessUp, .brightnessDown,

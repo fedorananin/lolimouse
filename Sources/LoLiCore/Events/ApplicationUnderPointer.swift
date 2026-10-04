@@ -18,6 +18,9 @@ import Foundation
 /// exists. No permission is needed: window titles would require Screen
 /// Recording, but owners and bounds do not.
 ///
+/// The same list also says whether Mission Control is up, which the trackpad
+/// swipes need to know — see `isWindowOverviewShowing()`.
+///
 /// Safe to call from any thread.
 public final class ApplicationUnderPointer {
     public static let shared = ApplicationUnderPointer()
@@ -98,6 +101,51 @@ public final class ApplicationUnderPointer {
     }
 
     private static let dockLayer = Int(CGWindowLevelForKey(.dockWindow))
+
+    // MARK: - Mission Control
+
+    /// Whether Mission Control or App Exposé is covering a display right now.
+    ///
+    /// While either is up, three- and four-finger swipes are the system's:
+    /// swiping down is how Mission Control is dismissed. LoLiMouse cannot keep
+    /// a swipe from macOS, so the only way not to act on the same movement
+    /// twice is to notice the overview and stand aside.
+    ///
+    /// There is no public notification for this. What gives it away is the
+    /// overview's backdrop: a window the size of the display, just under the
+    /// Dock's level. Measured on macOS 27, where it belongs to WindowManager,
+    /// sits at layer 19, is on screen within 50 ms of the overview starting to
+    /// open, and stays until about 0.3 s after it starts to close. Earlier
+    /// versions are reported to draw it from the Dock at layer 18, which the
+    /// same test covers; that has not been checked here.
+    public func isWindowOverviewShowing() -> Bool {
+        Self.overviewBackdropOwners(in: currentWindows(), displays: Self.displayBounds()).contains { pid in
+            bundleIdentifier(of: pid).map(Self.overviewOwners.contains) ?? false
+        }
+    }
+
+    /// The owners of every window that could be the overview's backdrop: one
+    /// covering a whole display, above ordinary windows and below the Dock.
+    /// Whether the owner is a process that draws the overview is the caller's
+    /// question — a screenshot tool's full-screen overlay sits in the same
+    /// place.
+    public static func overviewBackdropOwners(in windows: [Window], displays: [CGRect]) -> [pid_t] {
+        windows.filter { window in
+            window.layer > 0 && window.layer < dockLayer && window.alpha > 0
+                && displays.contains { window.bounds.contains($0) }
+        }.map(\.ownerPID)
+    }
+
+    private static let overviewOwners: Set<String> = ["com.apple.WindowManager", "com.apple.dock"]
+
+    /// Every active display, in the global coordinates window bounds use.
+    private static func displayBounds() -> [CGRect] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &displays, &count) == .success else { return [] }
+        return displays.prefix(Int(count)).map { CGDisplayBounds($0) }
+    }
 
     private func currentWindows() -> [Window] {
         let now = ProcessInfo.processInfo.systemUptime

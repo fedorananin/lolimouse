@@ -392,7 +392,8 @@ public struct ButtonMapping: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-/// Which way the mouse was flicked while a gesture button was held.
+/// Which way a gesture went: the mouse flicked while a gesture button was
+/// held, or fingers swiped across a trackpad.
 public enum GestureDirection: String, Codable, Equatable, CaseIterable, Sendable {
     case up, down, left, right
 
@@ -402,6 +403,16 @@ public enum GestureDirection: String, Codable, Equatable, CaseIterable, Sendable
         case .down: return "Flick down"
         case .left: return "Flick left"
         case .right: return "Flick right"
+        }
+    }
+
+    /// The same direction, named as a trackpad swipe.
+    public var swipeDisplayName: String {
+        switch self {
+        case .up: return "Swipe up"
+        case .down: return "Swipe down"
+        case .left: return "Swipe left"
+        case .right: return "Swipe right"
         }
     }
 }
@@ -473,6 +484,19 @@ public struct ButtonSettings: Codable, Equatable, Sendable {
 
 // MARK: - Trackpad gestures
 
+/// One thing a hand can do on a trackpad that LoLiMouse recognises.
+public enum TrackpadGesture: Hashable, Sendable {
+    case tap(fingers: Int)
+    case swipe(fingers: Int, direction: GestureDirection)
+
+    public var displayName: String {
+        switch self {
+        case let .tap(fingers): return "\(fingers)-finger tap"
+        case let .swipe(fingers, direction): return "\(fingers)-finger \(direction.swipeDisplayName.lowercased())"
+        }
+    }
+}
+
 /// Gestures read from a trackpad's multitouch surface. Only meaningful on a
 /// device whose pointer service reports a touch pad.
 public struct TrackpadSettings: Codable, Equatable, Sendable {
@@ -483,22 +507,49 @@ public struct TrackpadSettings: Codable, Equatable, Sendable {
     /// Same for four fingers. macOS has no default tap for four, so this one
     /// needs nothing switched off elsewhere.
     public var fourFingerTap: Setting<Action>
+    /// What swiping with exactly three fingers does, by direction. A
+    /// direction that is absent, or bound to `.passthrough`, is not ours.
+    ///
+    /// The multitouch stream is read-only: LoLiMouse sees the swipe but
+    /// cannot keep it from macOS. Where the system has a gesture of its own
+    /// on the same swipe — Mission Control, App Exposé, switching between
+    /// full-screen applications — both fire until the user frees it under
+    /// System Settings › Trackpad › More Gestures.
+    public var threeFingerSwipes: Setting<[GestureDirection: Action]>
+    /// Same for four fingers.
+    public var fourFingerSwipes: Setting<[GestureDirection: Action]>
 
     public init(
         threeFingerTap: Setting<Action> = .off(.mouseButton(2)),
-        fourFingerTap: Setting<Action> = .off(.missionControl)
+        fourFingerTap: Setting<Action> = .off(.missionControl),
+        threeFingerSwipes: Setting<[GestureDirection: Action]> = .off(TrackpadSettings.defaultThreeFingerSwipes),
+        fourFingerSwipes: Setting<[GestureDirection: Action]> = .off(TrackpadSettings.defaultFourFingerSwipes)
     ) {
         self.threeFingerTap = threeFingerTap
         self.fourFingerTap = fourFingerTap
+        self.threeFingerSwipes = threeFingerSwipes
+        self.fourFingerSwipes = fourFingerSwipes
     }
 
-    // A config written before the four-finger tap existed has no key for it.
+    /// Down is the one direction macOS leaves free out of the box (App Exposé
+    /// ships switched off), so that is where the defaults go.
+    public static let defaultThreeFingerSwipes: [GestureDirection: Action] = [.down: .minimizeWindow]
+    public static let defaultFourFingerSwipes: [GestureDirection: Action] = [.down: .hideApplication]
+
+    // A config written before the four-finger tap or the swipes existed has
+    // no keys for them.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         threeFingerTap = try container.decodeIfPresent(Setting<Action>.self, forKey: .threeFingerTap)
             ?? .off(.mouseButton(2))
         fourFingerTap = try container.decodeIfPresent(Setting<Action>.self, forKey: .fourFingerTap)
             ?? .off(.missionControl)
+        threeFingerSwipes = try container.decodeIfPresent(
+            Setting<[GestureDirection: Action]>.self, forKey: .threeFingerSwipes
+        ) ?? .off(Self.defaultThreeFingerSwipes)
+        fourFingerSwipes = try container.decodeIfPresent(
+            Setting<[GestureDirection: Action]>.self, forKey: .fourFingerSwipes
+        ) ?? .off(Self.defaultFourFingerSwipes)
     }
 
     /// The tap setting for a finger count, or `nil` for counts not offered.
@@ -510,9 +561,36 @@ public struct TrackpadSettings: Codable, Equatable, Sendable {
         }
     }
 
+    /// The swipe setting for a finger count, or `nil` for counts not offered.
+    public func swipes(fingers: Int) -> Setting<[GestureDirection: Action]>? {
+        switch fingers {
+        case 3: return threeFingerSwipes
+        case 4: return fourFingerSwipes
+        default: return nil
+        }
+    }
+
     public static let offeredFingerCounts = [3, 4]
 
-    public var managesAnything: Bool { threeFingerTap.enabled || fourFingerTap.enabled }
+    /// What each gesture that is switched on does. A gesture that is not in
+    /// here is left alone.
+    public var actions: [TrackpadGesture: Action] {
+        var actions: [TrackpadGesture: Action] = [:]
+        for fingers in Self.offeredFingerCounts {
+            if let action = tap(fingers: fingers)?.effective {
+                actions[.tap(fingers: fingers)] = action
+            }
+            for (direction, action) in swipes(fingers: fingers)?.effective ?? [:] where action != .passthrough {
+                actions[.swipe(fingers: fingers, direction: direction)] = action
+            }
+        }
+        return actions
+    }
+
+    public var managesAnything: Bool {
+        threeFingerTap.enabled || fourFingerTap.enabled
+            || threeFingerSwipes.enabled || fourFingerSwipes.enabled
+    }
 }
 
 // MARK: - Per-device configuration

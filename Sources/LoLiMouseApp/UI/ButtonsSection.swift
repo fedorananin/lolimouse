@@ -16,7 +16,8 @@ struct ButtonsSection: View {
                 thumbButton
             }
             if model.device.isTrackpad {
-                threeFingerTap
+                fingerTaps
+                fingerSwipes
             }
             ordinaryButtons
         }
@@ -24,7 +25,7 @@ struct ButtonsSection: View {
 
     // MARK: - Trackpad
 
-    private var threeFingerTap: some View {
+    private var fingerTaps: some View {
         SettingsSection(
             title: "Finger taps",
             subtitle: "A quick tap with several fingers, without moving them."
@@ -50,6 +51,74 @@ struct ButtonsSection: View {
             ) {
                 ActionPicker(label: "Tap", action: model.value(\.trackpad.fourFingerTap))
                     .frame(width: 320)
+            }
+        }
+    }
+
+    private var fingerSwipes: some View {
+        SettingsSection(
+            title: "Finger swipes",
+            subtitle: "Several fingers moving together across the trackpad."
+        ) {
+            ManagedSetting(
+                title: "Three-finger swipes",
+                help: "macOS swipes up with three fingers for Mission Control and sideways between "
+                    + "full-screen applications, unless those are switched off or moved to four fingers.",
+                isManaged: model.enabled(\.trackpad.threeFingerSwipes),
+                override: model.override(\.trackpad.threeFingerSwipes)
+            ) {
+                directionEditor(model.value(\.trackpad.threeFingerSwipes), name: \.swipeDisplayName,
+                                unset: .passthrough)
+            }
+
+            Divider()
+
+            ManagedSetting(
+                title: "Four-finger swipes",
+                help: "Free unless the system gestures above have been moved to four fingers.",
+                isManaged: model.enabled(\.trackpad.fourFingerSwipes),
+                override: model.override(\.trackpad.fourFingerSwipes)
+            ) {
+                directionEditor(model.value(\.trackpad.fourFingerSwipes), name: \.swipeDisplayName,
+                                unset: .passthrough)
+            }
+
+            Text("LoLiMouse sees a swipe but cannot keep it from macOS: where the system has a "
+                + "gesture of its own on the same swipe, both fire. Free it under System Settings › "
+                + "Trackpad › More Gestures. While Mission Control is open, swipes are left to it. "
+                + "Window actions apply to the application in front.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// One action picker per direction. A direction the map does not mention
+    /// shows as `unset`.
+    private func directionEditor(
+        _ actions: Binding<[GestureDirection: Action]>,
+        name: KeyPath<GestureDirection, String>,
+        unset: Action
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(GestureDirection.allCases, id: \.self) { direction in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(direction[keyPath: name])
+                        .frame(width: 90, alignment: .leading)
+                    ActionPicker(
+                        label: "",
+                        action: Binding(
+                            get: { actions.wrappedValue[direction] ?? unset },
+                            set: { newValue in
+                                var updated = actions.wrappedValue
+                                updated[direction] = newValue
+                                actions.wrappedValue = updated
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .frame(width: 260)
+                }
             }
         }
     }
@@ -120,28 +189,8 @@ struct ButtonsSection: View {
 
     @ViewBuilder
     private var gestureEditor: some View {
-        let gestures = model.value(\.buttons.thumbButton.gestures)
-
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(GestureDirection.allCases, id: \.self) { direction in
-                HStack(alignment: .firstTextBaseline) {
-                    Text(direction.displayName)
-                        .frame(width: 90, alignment: .leading)
-                    ActionPicker(
-                        label: "",
-                        action: Binding(
-                            get: { gestures.wrappedValue[direction] ?? .none },
-                            set: { newValue in
-                                var updated = gestures.wrappedValue
-                                updated[direction] = newValue
-                                gestures.wrappedValue = updated
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .frame(width: 260)
-                }
-            }
+            directionEditor(model.value(\.buttons.thumbButton.gestures), name: \.displayName, unset: .none)
 
             // How far a flick travels is a feel for the hand, not for the
             // window, so it is set once for all applications.

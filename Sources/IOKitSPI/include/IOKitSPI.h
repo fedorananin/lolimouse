@@ -15,8 +15,9 @@
 //    2. Reading and writing the high-resolution scroll deltas that Logitech
 //       wheels report, which live in the IOHIDEvent rather than the CGEvent
 //       (IOHIDEventGetFloatValue / IOHIDEventSetFloatValue).
-//    3. Raw trackpad contact frames from MultitouchSupport.framework, for the
-//       three-finger tap (types only; the functions are resolved at runtime).
+//    3. Raw trackpad contact frames from MultitouchSupport.framework, for
+//       finger taps and swipes (types only; the functions are resolved at
+//       runtime).
 //
 //  MIT License.
 //

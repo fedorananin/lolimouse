@@ -38,6 +38,8 @@ public enum OverridableSetting: String, CaseIterable, Codable, Hashable, Sendabl
     case thumbButtonGestures = "buttons.thumbButton.gestures"
     case threeFingerTap = "trackpad.threeFingerTap"
     case fourFingerTap = "trackpad.fourFingerTap"
+    case threeFingerSwipes = "trackpad.threeFingerSwipes"
+    case fourFingerSwipes = "trackpad.fourFingerSwipes"
 
     /// The setting a key path into `DeviceConfiguration` points at, if a
     /// profile may change it. Key paths compare by their components, so a path
@@ -84,6 +86,8 @@ public enum OverridableSetting: String, CaseIterable, Codable, Hashable, Sendabl
         case .thumbButtonGestures: return Accessor(\.buttons.thumbButton.gestures)
         case .threeFingerTap: return Accessor(\.trackpad.threeFingerTap)
         case .fourFingerTap: return Accessor(\.trackpad.fourFingerTap)
+        case .threeFingerSwipes: return Accessor(\.trackpad.threeFingerSwipes)
+        case .fourFingerSwipes: return Accessor(\.trackpad.fourFingerSwipes)
         }
     }
 

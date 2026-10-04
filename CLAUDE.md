@@ -179,7 +179,12 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
   registry through the IORegistry "Multitouch ID" property).
 - Custom actions: a recorded keyboard shortcut, a synthesised double click
   and a synthesised ⌘ + scroll, bound to buttons and thumb gestures.
-- 119 tests pass.
+- A three-finger swipe down on the built-in trackpad (`FingerSwipeDetector`)
+  minimising the window in front through Accessibility, and swipes standing
+  aside while Mission Control is up (`OverviewWatch`,
+  `isWindowOverviewShowing`; the backdrop window's signature was measured on
+  macOS 27 only).
+- 139 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:
@@ -197,6 +202,8 @@ the two reference implementations, never exercised against a real device:
 - Per-application profiles (`AppProfile`, `ApplicationUnderPointer`): the
   window-list lookup, and profile switching for scrolling, button mappings,
   diverted buttons and trackpad taps
+- Four-finger swipes, and three-finger swipes up, left and right
+- The `hideApplication` action (`NSRunningApplication.hide()`)
 
 Do not describe any of the above as working until it has been seen working.
 

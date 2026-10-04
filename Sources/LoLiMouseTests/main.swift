@@ -1017,6 +1017,255 @@ suite("Finger taps — only a quick, still touch with exactly N fingers counts")
     }
 }
 
+// MARK: - Finger swipes
+
+suite("Finger swipes — every finger moving the same way, once per touch") {
+    typealias Contact = FingerSwipeDetector.Contact
+    typealias Swipe = FingerSwipeDetector.Swipe
+
+    func detector() -> FingerSwipeDetector { FingerSwipeDetector(fingerCounts: [3, 4]) }
+
+    /// Fingers side by side, all moved by the same offset from where they
+    /// landed. `y` grows away from the user, as MultitouchSupport reports it.
+    func hand(_ fingers: Int, dx: Double = 0, dy: Double = 0) -> [Contact] {
+        (0 ..< fingers).map { Contact(id: $0, x: 0.3 + 0.1 * Double($0) + dx, y: 0.5 + dy) }
+    }
+
+    /// The hand travelling `dx`, `dy` in even steps.
+    func glide(_ fingers: Int, dx: Double = 0, dy: Double = 0, steps: Int = 10) -> [[Contact]] {
+        (0 ... steps).map { step in
+            let part = Double(step) / Double(steps)
+            return hand(fingers, dx: dx * part, dy: dy * part)
+        }
+    }
+
+    /// Feeds frames 10 ms apart and returns every swipe reported.
+    func feed(_ detector: inout FingerSwipeDetector, _ frames: [[Contact]], from start: Double = 0) -> [Swipe] {
+        var swipes: [Swipe] = []
+        for (index, contacts) in frames.enumerated() {
+            if let swipe = detector.process(contacts: contacts, timestamp: start + Double(index) * 0.01) {
+                swipes.append(swipe)
+            }
+        }
+        return swipes
+    }
+
+    test("three fingers moving down together is a three-finger swipe down") {
+        var detector = detector()
+        expectEqual(feed(&detector, glide(3, dy: -0.3) + [[]]), [Swipe(fingers: 3, direction: .down)])
+    }
+
+    test("four fingers are told apart from three") {
+        var detector = detector()
+        expectEqual(feed(&detector, glide(4, dy: -0.3) + [[]]), [Swipe(fingers: 4, direction: .down)])
+    }
+
+    test("each direction is recognised") {
+        var detector = detector()
+        expectEqual(feed(&detector, glide(3, dy: 0.3) + [[]]).map(\.direction), [.up])
+        expectEqual(feed(&detector, glide(3, dx: -0.2) + [[]], from: 1).map(\.direction), [.left])
+        expectEqual(feed(&detector, glide(3, dx: 0.2) + [[]], from: 2).map(\.direction), [.right])
+    }
+
+    test("the swipe fires while the fingers are still down, and only once") {
+        var detector = detector()
+        expectEqual(feed(&detector, glide(3, dy: -0.4, steps: 20)).count, 1, "no lift needed")
+        expectEqual(feed(&detector, glide(3, dy: 0.4, steps: 20), from: 0.3).count, 0,
+                    "swiping back without lifting is the same touch")
+        expectEqual(feed(&detector, [[]] + glide(3, dy: -0.3), from: 1).count, 1, "a new touch swipes again")
+    }
+
+    test("two fingers scrolling beside a resting thumb is not a swipe") {
+        // The mean of the three contacts moves two thirds as far as the
+        // scroll does — plenty for the threshold. Only the thumb gives it away.
+        var detector = detector()
+        let frames: [[Contact]] = (0 ... 10).map { step in
+            let dy = -0.4 * Double(step) / 10
+            return [
+                Contact(id: 0, x: 0.4, y: 0.7 + dy),
+                Contact(id: 1, x: 0.5, y: 0.7 + dy),
+                Contact(id: 2, x: 0.6, y: 0.1),
+            ]
+        }
+        expectEqual(feed(&detector, frames + [[]]), [])
+    }
+
+    test("a fast four-finger swipe whose last finger lands late is not a three-finger one") {
+        var detector = detector()
+        var swipes: [Swipe] = []
+        func frame(_ time: Double, _ contacts: [Contact]) {
+            if let swipe = detector.process(contacts: contacts, timestamp: time) { swipes.append(swipe) }
+        }
+        // Three fingers arrive already moving and cover the whole threshold
+        // in 20 ms, before the fourth is down.
+        frame(0.000, hand(3))
+        frame(0.010, hand(3, dy: -0.10))
+        frame(0.020, hand(3, dy: -0.20))
+        frame(0.030, hand(4, dy: -0.20))
+        frame(0.050, hand(4, dy: -0.30))
+        frame(0.080, hand(4, dy: -0.40))
+        frame(0.100, hand(4, dy: -0.45))
+        frame(0.120, [])
+        expectEqual(swipes, [Swipe(fingers: 4, direction: .down)])
+    }
+
+    test("a hand lifting off finger by finger does not become a smaller swipe") {
+        var detector = detector()
+        // Four fingers rest, one lifts, the other three slide away.
+        let frames = [hand(4), hand(4), hand(4)] + glide(3, dy: -0.3) + [[]]
+        expectEqual(feed(&detector, frames), [])
+    }
+
+    test("fingers creeping slowly are not a swipe") {
+        var detector = detector()
+        // The whole threshold twice over, but spread across three seconds.
+        expectEqual(feed(&detector, glide(3, dy: -0.3, steps: 300) + [[]]), [])
+    }
+
+    test("fingers that rest first and swipe afterwards still count") {
+        var detector = detector()
+        let resting = Array(repeating: hand(3), count: 100)
+        expectEqual(feed(&detector, resting + glide(3, dy: -0.3) + [[]]).map(\.direction), [.down])
+    }
+
+    test("a diagonal is nobody's swipe") {
+        var detector = detector()
+        // 0.2 of the width is 0.3 of the height on a 3:2 surface.
+        expectEqual(feed(&detector, glide(3, dx: 0.2, dy: -0.3) + [[]]), [])
+    }
+
+    test("the same hand movement counts the same across as up and down") {
+        var across = detector()
+        expectEqual(feed(&across, glide(3, dx: 0.11) + [[]]).map(\.direction), [.right],
+                    "0.11 of the width is 0.165 of the height")
+        var along = detector()
+        expectEqual(feed(&along, glide(3, dy: 0.11) + [[]]), [], "0.11 of the height is short of 0.15")
+    }
+
+    test("a tap is not a swipe, and a swipe is not a tap") {
+        var swipes = detector()
+        expectEqual(feed(&swipes, glide(3, dy: -0.02, steps: 5) + [[]]), [])
+
+        var taps = FingerTapDetector(fingers: 3)
+        var tapped = false
+        for (index, contacts) in (glide(3, dy: -0.3) + [[]]).enumerated() {
+            let centroid: (x: Double, y: Double)? = contacts.isEmpty ? nil : (0.4, contacts[0].y)
+            if taps.process(fingerCount: contacts.count, centroid: centroid, timestamp: Double(index) * 0.01) {
+                tapped = true
+            }
+        }
+        expectEqual(tapped, false)
+    }
+
+    test("finger counts that were not asked for are ignored") {
+        var detector = detector()
+        expectEqual(feed(&detector, glide(2, dy: -0.3) + [[]]), [])
+        expectEqual(feed(&detector, glide(5, dy: -0.3) + [[]], from: 1), [])
+        var threeOnly = FingerSwipeDetector(fingerCounts: [3])
+        expectEqual(feed(&threeOnly, glide(4, dy: -0.3) + [[]]), [])
+    }
+
+    test("swipes are off by default and decode when absent") {
+        let json = Data(#"{"trackpad": {"threeFingerTap": {"enabled": true, "value": {"missionControl": {}}}}}"#.utf8)
+        guard let decoded = try? JSONDecoder().decode(DeviceConfiguration.self, from: json) else {
+            expect(false, "decoding failed")
+            return
+        }
+        expectEqual(decoded.trackpad.threeFingerSwipes, .off([.down: .minimizeWindow]))
+        expectEqual(decoded.trackpad.fourFingerSwipes, .off([.down: .hideApplication]))
+        expectEqual(decoded.trackpad.actions, [.tap(fingers: 3): .missionControl],
+                    "a swipe that is switched off is bound to nothing")
+        expectNil(decoded.trackpad.swipes(fingers: 5))
+    }
+
+    test("only what is switched on and bound becomes an action") {
+        var trackpad = TrackpadSettings()
+        expectEqual(trackpad.managesAnything, false)
+        trackpad.threeFingerSwipes = .on([.down: .minimizeWindow, .up: .passthrough])
+        trackpad.fourFingerSwipes = .on([.down: .hideApplication, .left: .back])
+        expectEqual(trackpad.managesAnything, true)
+        expectEqual(trackpad.actions, [
+            .swipe(fingers: 3, direction: .down): .minimizeWindow,
+            .swipe(fingers: 4, direction: .down): .hideApplication,
+            .swipe(fingers: 4, direction: .left): .back,
+        ], "a direction left to the system is not ours")
+    }
+
+    test("swipe settings round-trip through JSON") {
+        var device = DeviceConfiguration()
+        device.trackpad.threeFingerSwipes = .on([.down: .minimizeWindow, .right: .keyPress(KeyCombo(keyCode: 0x0D, command: true))])
+        guard let data = try? JSONEncoder().encode(device),
+              let decoded = try? JSONDecoder().decode(DeviceConfiguration.self, from: data)
+        else {
+            expect(false, "round trip failed")
+            return
+        }
+        expectEqual(decoded.trackpad, device.trackpad)
+    }
+
+    test("swipes can differ in one application and do not need the event tap") {
+        var device = DeviceConfiguration()
+        device.trackpad.threeFingerSwipes = .on([.down: .minimizeWindow])
+        device.apps["app"] = AppProfile(name: "App")
+        device.editProfile("app") { $0.trackpad.threeFingerSwipes = .off([.down: .minimizeWindow]) }
+        expectEqual(device.apps["app"]?.overridden, [.threeFingerSwipes])
+        expectEqual(device.applicationConfigurations["app"]?.trackpad.actions, [:])
+        expectEqual(device.usesEventTap, false)
+        expectEqual(OverridableSetting(path: \DeviceConfiguration.trackpad.fourFingerSwipes), .fourFingerSwipes)
+    }
+
+    test("Mission Control's backdrop is told from everything else on screen") {
+        typealias Window = ApplicationUnderPointer.Window
+        let display = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+        let second = CGRect(x: 1800, y: 0, width: 2560, height: 1440)
+        func owners(_ windows: [Window], displays: [CGRect] = [display]) -> [pid_t] {
+            ApplicationUnderPointer.overviewBackdropOwners(in: windows, displays: displays)
+        }
+        // As measured on macOS 27: the Dock's own window and the desktop are
+        // always there, the layer-19 backdrop only while the overview is up.
+        let dock = Window(ownerPID: 903, bounds: display, layer: 20)
+        let desktop = Window(ownerPID: 738, bounds: display, layer: -2_147_483_624)
+        let backdrop = Window(ownerPID: 738, bounds: display, layer: 19)
+        let spacesBar = Window(ownerPID: 738, bounds: CGRect(x: 0, y: 0, width: 1800, height: 134), layer: 14)
+
+        expectEqual(owners([dock, desktop]), [], "idle")
+        expectEqual(owners([dock, backdrop, spacesBar, desktop]), [738], "Mission Control")
+        expectEqual(owners([dock, spacesBar, desktop]), [], "the Spaces bar alone outlives the backdrop")
+        expectEqual(owners([Window(ownerPID: 1, bounds: display, layer: 0)]), [],
+                    "a full-screen application window is not an overview")
+        expectEqual(owners([Window(ownerPID: 738, bounds: display, layer: 19, alpha: 0)]), [], "invisible")
+        expectEqual(owners([Window(ownerPID: 738, bounds: second, layer: 19)], displays: [display, second]),
+                    [738], "on the second display")
+    }
+
+    test("Mission Control is looked for once per touch, as the fingers land") {
+        var watch = OverviewWatch(fingers: 3)
+        expectEqual(watch.shouldLook(fingerCount: 1), false, "pointing costs nothing")
+        expectEqual(watch.shouldLook(fingerCount: 2), false, "nor does scrolling")
+        expectEqual(watch.shouldLook(fingerCount: 3), true)
+        expectEqual(watch.shouldLook(fingerCount: 3), false, "once is enough")
+        expectEqual(watch.shouldLook(fingerCount: 4), false, "a fourth finger is the same touch")
+        watch.sawOverview()
+        // The overview closes under the moving fingers; the touch is still its.
+        expectEqual(watch.shouldLook(fingerCount: 2), false)
+        expectEqual(watch.overviewSeen, true, "remembered until the hand lifts")
+        expectEqual(watch.shouldLook(fingerCount: 0), false)
+        expectEqual(watch.overviewSeen, false, "a new touch starts clean")
+        expectEqual(watch.shouldLook(fingerCount: 4), true, "four fingers landing at once")
+    }
+
+    test("the window actions have names and survive JSON") {
+        expectEqual(Action.minimizeWindow.displayName, "Minimise window")
+        expectEqual(Action.hideApplication.displayName, "Hide application")
+        for action in [Action.minimizeWindow, .hideApplication] {
+            let data = try? JSONEncoder().encode(action)
+            expectEqual(data.flatMap { try? JSONDecoder().decode(Action.self, from: $0) }, action)
+            expect(Action.simpleChoices.contains(action), "\(action.displayName) is offered in the menu")
+        }
+        expectEqual(TrackpadGesture.swipe(fingers: 3, direction: .down).displayName, "3-finger swipe down")
+    }
+}
+
 // MARK: - Reconciler
 
 suite("Reconciler — nothing is written while the Mac sleeps") {

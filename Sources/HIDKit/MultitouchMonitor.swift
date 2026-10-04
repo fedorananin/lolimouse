@@ -19,13 +19,28 @@ import os.log
 public final class MultitouchMonitor {
     private static let log = LoLiLog.hid
 
-    /// A reduced frame: what the tap detector needs and nothing else.
+    /// One finger in a frame.
+    public struct Touch: Sendable {
+        /// The framework's path index: the same number for one finger from
+        /// the moment it lands until it lifts.
+        public let id: Int
+        /// Position in 0…1 surface units. `x` grows to the right, `y` away
+        /// from the user — towards the keyboard on a built-in trackpad.
+        public let x: Double
+        public let y: Double
+    }
+
+    /// A reduced frame: what the gesture detectors need and nothing else.
     public struct Frame: Sendable {
         public let deviceID: UInt64
         public let fingerCount: Int
         /// Mean position of the fingers in 0…1 surface units, or `nil` when
         /// none are down.
         public let centroid: (x: Double, y: Double)?
+        /// Every finger on its own. The swipe detector needs them apart: a
+        /// centroid cannot tell three fingers moving together from two
+        /// scrolling next to a resting thumb.
+        public let touches: [Touch]
         public let timestamp: TimeInterval
     }
 
@@ -106,15 +121,21 @@ public final class MultitouchMonitor {
     private func deliver(device: UnsafeMutableRawPointer, touches: UnsafeMutablePointer<LoLiMTTouch>?, count: Int, timestamp: Double) {
         guard let entry = devices.first(where: { $0.ref == device }) else { return }
         var centroid: (x: Double, y: Double)?
+        var fingers: [Touch] = []
         if count > 0, let touches {
+            fingers.reserveCapacity(count)
             var sx = 0.0, sy = 0.0
             for index in 0..<count {
-                sx += Double(touches[index].normalized.position.x)
-                sy += Double(touches[index].normalized.position.y)
+                let x = Double(touches[index].normalized.position.x)
+                let y = Double(touches[index].normalized.position.y)
+                sx += x
+                sy += y
+                fingers.append(Touch(id: Int(touches[index].pathIndex), x: x, y: y))
             }
             centroid = (sx / Double(count), sy / Double(count))
         }
-        onFrame?(Frame(deviceID: entry.id, fingerCount: count, centroid: centroid, timestamp: timestamp))
+        onFrame?(Frame(deviceID: entry.id, fingerCount: count, centroid: centroid,
+                       touches: fingers, timestamp: timestamp))
     }
 
     // MARK: - dlsym bindings

@@ -128,6 +128,17 @@ Event handling:
   get Mission Control, or pick any other action from the list. Off by default;
   switch off Look Up under System Settings › Trackpad so it and the
   three-finger tap do not fire together.
+- **Three- and four-finger swipes on the trackpad** — up, down, left and
+  right, each bound to its own action or left to the system. Swipe down with
+  three fingers to minimise the window in front, with four to hide the whole
+  application, or pick anything else. LoLiMouse reads the swipe but cannot
+  keep it from macOS, so a swipe the system already uses (Mission Control,
+  App Exposé, switching between full-screen applications) has to be freed
+  under System Settings › Trackpad › More Gestures first, or both will fire.
+  While Mission Control or App Exposé is open the swipes stand aside, so
+  swiping the overview away does nothing else.
+- **Window actions** — minimise the window in front or hide the application
+  in front, from any button or gesture.
 
 Per-application profiles:
 
