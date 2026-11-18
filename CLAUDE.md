@@ -184,7 +184,7 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
   aside while Mission Control is up (`OverviewWatch`,
   `isWindowOverviewShowing`; the backdrop window's signature was measured on
   macOS 27 only).
-- 152 tests pass.
+- 161 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:
@@ -209,6 +209,10 @@ the two reference implementations, never exercised against a real device:
   the application to the front from a menu bar agent
 - Settings transfer (`SettingsTransfer.swift`, `SettingsTransferMenu`):
   copying from another device, export and import through a file
+- MX Master 4 haptic panel (CID `0x01A0`, from OpenLogi) as the thumb
+  button and the side gesture button (`0x00C3`) as `buttons.gestureButton`:
+  the `getCidReporting` presence probe, raw-XY from the panel, dropping the
+  first raw-XY sample after a press
 
 Do not describe any of the above as working until it has been seen working.
 

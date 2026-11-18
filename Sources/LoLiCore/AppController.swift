@@ -449,7 +449,7 @@ public final class AppController: ObservableObject {
 
         for device in devices {
             let configuration = store.configuration.device(device.key)
-            if !configuration.buttons.divertedControls.isEmpty {
+            if configuration.buttons.divertsAnything {
                 router.attach(device)
             }
             // Remember the name so an unplugged device still has a label.
@@ -481,7 +481,7 @@ public final class AppController: ObservableObject {
 
         for device in registry.devices {
             let deviceConfiguration = configuration.device(device.key)
-            if deviceConfiguration.buttons.divertedControls.isEmpty {
+            if !deviceConfiguration.buttons.divertsAnything {
                 router.detach(device.key)
             } else {
                 router.attach(device)

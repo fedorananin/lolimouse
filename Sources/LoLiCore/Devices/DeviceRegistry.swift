@@ -23,6 +23,9 @@ public struct DeviceCapabilities: Equatable {
     public var reportRate = false
     /// Button diversion, 0x1B04 — what the wheel-mode and thumb buttons need.
     public var buttonDiversion = false
+    /// A haptic panel under the thumb (MX Master 4). Its gesture button then
+    /// sits on the side and gets settings of its own.
+    public var hapticPanel = false
 
     public init() {}
 }
@@ -308,6 +311,13 @@ public final class DeviceRegistry: ObservableObject {
         capabilities.dpi = target.supports(.adjustableDPI)
         capabilities.reportRate = target.supports(.reportRate)
         capabilities.buttonDiversion = target.supports(.reprogrammableControlsV4)
+        // One round trip rather than the whole control table, which costs one
+        // per row and would be read again on every scan: asking for the
+        // reporting state of a control the device lacks is answered with an
+        // error.
+        if capabilities.buttonDiversion, target.supportsLongReports {
+            capabilities.hapticPanel = (try? target.controlReporting(HIDPPControl.hapticPanel).get()) != nil
+        }
         return capabilities
     }
 

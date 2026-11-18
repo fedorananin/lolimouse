@@ -25,9 +25,20 @@ public enum HIDPPControl {
 
     /// The button under the thumb rest on MX Master mice. Logitech ships it as
     /// the "gesture button": held down, it also streams pointer movement.
+    ///
+    /// Not under the thumb rest on every model. The MX Master 4 moved it to
+    /// the side, next to back and forward, and put the haptic panel below.
     public static let gestureButton: HIDPPControlID = 0x00C3
     public static let multiplatformGestureButton: HIDPPControlID = 0x00D0
     public static let virtualGestureButton: HIDPPControlID = 0x00D7
+
+    /// The MX Master 4's Haptic Sense Panel: the pressure-sensitive thumb rest
+    /// that takes the place the gesture button has on earlier MX Masters.
+    /// Absent from Logitech's published control list; the value and its
+    /// behaviour — presses arrive as diverted-button events, and held down it
+    /// streams raw XY like the gesture button — come from OpenLogi, which
+    /// found them on the hardware.
+    public static let hapticPanel: HIDPPControlID = 0x01A0
 
     /// The small button just below the scroll wheel. Named SmartShift because
     /// its factory function is toggling the wheel ratchet.
@@ -40,10 +51,40 @@ public enum HIDPPControl {
         0x00CE, 0x00CF, 0x00D9, 0x00DB,
     ]
 
-    /// Every control that behaves like the MX Master thumb button.
+    /// Every CID of the dedicated gesture button.
     public static let gestureCapable: Set<HIDPPControlID> = [
         gestureButton, multiplatformGestureButton, virtualGestureButton,
     ]
+
+    /// Every control that can be held down and flicked: the gesture button
+    /// and the haptic panel.
+    public static let gestureSources: Set<HIDPPControlID> = gestureCapable.union([hapticPanel])
+
+    /// Which of the two gesture-capable places on a mouse a control is.
+    public enum GestureRole: Equatable, Sendable {
+        /// Under the thumb rest: the gesture button on most MX mice, the haptic
+        /// panel where there is one. This is what the "thumb button" settings
+        /// drive, so they land in the same place under the hand on a new
+        /// mouse as on the old one.
+        case thumbRest
+        /// The gesture button on a mouse whose thumb rest is the haptic panel:
+        /// a separate button on the side, with settings of its own.
+        case sideGestureButton
+    }
+
+    /// The role `control` plays on a mouse that does or does not have a
+    /// haptic panel, or `nil` for a control that cannot gesture.
+    public static func gestureRole(of control: HIDPPControlID, hasHapticPanel: Bool) -> GestureRole? {
+        if control == hapticPanel { return .thumbRest }
+        guard gestureCapable.contains(control) else { return nil }
+        return hasHapticPanel ? .sideGestureButton : .thumbRest
+    }
+
+    /// The controls among `available` that play `role`.
+    public static func controls(for role: GestureRole, among available: Set<HIDPPControlID>) -> Set<HIDPPControlID> {
+        let hasHapticPanel = available.contains(hapticPanel)
+        return available.filter { gestureRole(of: $0, hasHapticPanel: hasHapticPanel) == role }
+    }
 
     public static func name(for control: HIDPPControlID) -> String? {
         switch control {
@@ -54,6 +95,7 @@ public enum HIDPPControl {
         case forward: return "Forward"
         case gestureButton, multiplatformGestureButton, virtualGestureButton: return "Thumb button"
         case wheelModeButton: return "Wheel mode button"
+        case hapticPanel: return "Haptic sense panel"
         default: return nil
         }
     }

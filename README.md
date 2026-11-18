@@ -95,7 +95,11 @@ Buttons macOS cannot see on its own:
   presets being the obvious one.
 - **The thumb button**, with optional flick gestures: hold it and move the mouse
   up, down, left or right. Gestures can be switched off entirely, leaving a
-  plain extra button.
+  plain extra button. On an MX Master 4 this is the haptic sense panel under
+  the thumb, so settings copied from an earlier MX Master land in the same
+  place under the hand.
+- **The MX Master 4's gesture button**, the extra one on the side next to back
+  and forward, with a press action and flick gestures of its own.
 
 Event handling:
 

@@ -15,7 +15,9 @@ import os.log
 ///
 /// The thumb button also streams pointer movement while held, which is what
 /// makes flick gestures possible: hold, move, release, and the direction
-/// decides what runs.
+/// decides what runs. On an MX Master 4 there are two such controls — the
+/// haptic panel under the thumb and the gesture button on the side — and each
+/// runs its own settings.
 public final class DivertedButtonRouter {
     private static let log = LoLiLog.events
 
@@ -35,7 +37,15 @@ public final class DivertedButtonRouter {
         var pressed: Set<HIDPPControlID> = []
         var gestureAccumulatorX: Double = 0
         var gestureAccumulatorY: Double = 0
-        var gestureButtonHeld = false
+        /// The gesture source being held, whose release resolves the flick.
+        /// Raw XY does not say which control it belongs to, so only one
+        /// source gestures at a time: the first one pressed.
+        var heldGestureSource: HIDPPControlID?
+        /// The first raw-XY sample after contact is a jump to wherever the
+        /// thumb landed on the haptic panel, not movement. OpenLogi drops it
+        /// for every gesture source; one sample of the gesture button is
+        /// worth nothing either way.
+        var discardNextRawXY = false
     }
 
     /// Starts listening to `device`. Safe to call repeatedly; a device already
@@ -118,7 +128,11 @@ public final class DivertedButtonRouter {
         case let .buttonsPressed(current):
             handleButtons(current, state: state, device: device, configuration: configuration)
         case let .rawXY(dx, dy):
-            guard state.gestureButtonHeld else { return }
+            guard state.heldGestureSource != nil else { return }
+            if state.discardNextRawXY {
+                state.discardNextRawXY = false
+                return
+            }
             state.gestureAccumulatorX += Double(dx)
             state.gestureAccumulatorY += Double(dy)
         }
@@ -144,17 +158,33 @@ public final class DivertedButtonRouter {
                 continue
             }
 
-            if HIDPPControl.gestureCapable.contains(control) {
-                state.gestureButtonHeld = true
+            if HIDPPControl.gestureSources.contains(control), state.heldGestureSource == nil {
+                state.heldGestureSource = control
                 state.gestureAccumulatorX = 0
                 state.gestureAccumulatorY = 0
+                state.discardNextRawXY = true
             }
         }
 
-        for control in released where HIDPPControl.gestureCapable.contains(control) {
-            state.gestureButtonHeld = false
-            resolveGesture(state: state, device: device, settings: configuration.buttons.thumbButton)
+        for control in released where control == state.heldGestureSource {
+            state.heldGestureSource = nil
+            guard let role = HIDPPControl.gestureRole(of: control, hasHapticPanel: Self.hasHapticPanel(device))
+            else { continue }
+            resolveGesture(state: state, device: device, role: role,
+                           settings: configuration.buttons.settings(for: role))
         }
+    }
+
+    /// Whether the gesture button is the thumb button on this mouse, or a
+    /// separate one beside a haptic panel. The control table is what the
+    /// reconciler diverted by, so it wins when it has been read; it is only
+    /// ever read from the cache here, since a transaction issued on the
+    /// notification thread would wait for an answer that thread delivers.
+    private static func hasHapticPanel(_ device: ManagedDevice) -> Bool {
+        if let table = device.target?.cachedControlTable {
+            return table.contains { $0.controlID == HIDPPControl.hapticPanel && $0.isDivertable }
+        }
+        return device.capabilities?.hapticPanel ?? false
     }
 
     /// Decides whether a thumb-button press was a flick or a plain tap, and runs
@@ -167,6 +197,7 @@ public final class DivertedButtonRouter {
     private func resolveGesture(
         state: DeviceState,
         device: ManagedDevice,
+        role: HIDPPControl.GestureRole,
         settings: GestureButtonSettings
     ) {
         let dx = state.gestureAccumulatorX
@@ -185,8 +216,10 @@ public final class DivertedButtonRouter {
                     direction = dy > 0 ? .down : .up
                 }
                 if let action = gestures[direction] {
-                    os_log("thumb gesture %{public}@ on %{public}@",
-                           log: Self.log, type: .info, direction.rawValue, device.displayName)
+                    os_log("%{public}@ gesture %{public}@ on %{public}@",
+                           log: Self.log, type: .info,
+                           role == .thumbRest ? "thumb" : "gesture-button",
+                           direction.rawValue, device.displayName)
                     _ = actions.run(action, device: device)
                 }
                 return

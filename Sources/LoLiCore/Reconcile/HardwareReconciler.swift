@@ -222,7 +222,7 @@ public final class HardwareReconciler: ObservableObject {
         let hardware = globallyEnabled ? configuration.hardware : HardwareSettings()
         let buttons = globallyEnabled ? configuration.buttons : ButtonSettings()
 
-        guard hardware.managesAnything || buttons.divertedControls.isEmpty == false || hasBaseline(device.key)
+        guard hardware.managesAnything || buttons.divertsAnything || hasBaseline(device.key)
         else {
             return .nothingToDo
         }
@@ -429,28 +429,32 @@ public final class HardwareReconciler: ObservableObject {
         key: String,
         buttons: ButtonSettings
     ) -> Result<Void, HIDPPError> {
-        let desired = buttons.divertedControls
         let previouslyDiverted = Set(baseline(key)?.divertedControls.keys ?? [:].keys)
 
-        guard !desired.isEmpty || !previouslyDiverted.isEmpty else { return .success(()) }
+        guard buttons.divertsAnything || !previouslyDiverted.isEmpty else { return .success(()) }
         guard target.supportsReprogrammableControls, target.supportsLongReports else {
             return .failure(.featureUnsupported(.reprogrammableControlsV4))
         }
 
-        // Which controls this device actually has. Asking for a control it does
-        // not implement is harmless but pointless.
-        let available = Set(target.controlTable().filter(\.isDivertable).map(\.controlID))
+        // Which controls this device actually has. Which control the thumb
+        // button settings drive depends on it: the gesture button, or the
+        // haptic panel on a mouse that has one.
+        let table = target.controlTable().filter(\.isDivertable)
+        let available = Set(table.map(\.controlID))
+        let desired = buttons.divertedControls(among: available)
 
         var lastError: HIDPPError?
 
-        for control in desired.intersection(available) {
+        for control in desired {
             if baseline(key)?.divertedControls[control] == nil,
                case let .success(reporting) = target.controlReporting(control) {
                 mutateBaseline(key) { $0.divertedControls[control] = reporting.diverted }
             }
-            // Raw XY is only needed for the gesture button, and only when
-            // gestures are actually configured.
-            let needsRawXY = HIDPPControl.gestureCapable.contains(control)
+            // Raw XY is what makes flicks possible, and only gesture sources
+            // can stream it. Asked for only where the control says it can, as
+            // OpenLogi does: one that cannot still delivers its press.
+            let needsRawXY = HIDPPControl.gestureSources.contains(control)
+                && table.contains { $0.controlID == control && $0.supportsRawXY }
             let change = HIDPPControlReportingChange(diverted: true, rawXY: needsRawXY)
             if case let .failure(error) = target.setControlReporting(control, change) {
                 lastError = error

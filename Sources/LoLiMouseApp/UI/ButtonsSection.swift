@@ -14,6 +14,9 @@ struct ButtonsSection: View {
             if model.device.supportsHardwareSettings, model.supports(\.buttonDiversion) {
                 wheelModeButton
                 thumbButton
+                if hasHapticPanel {
+                    gestureButton
+                }
             }
             if model.device.isTrackpad {
                 fingerTaps
@@ -155,21 +158,52 @@ struct ButtonsSection: View {
         }
     }
 
-    // MARK: - Thumb button
+    // MARK: - Thumb button and gesture button
+
+    /// An MX Master 4: the thumb rest is the haptic panel, and the gesture
+    /// button is a separate one on the side.
+    private var hasHapticPanel: Bool {
+        model.device.capabilities?.hapticPanel ?? false
+    }
 
     private var thumbButton: some View {
-        SettingsSection(
+        gestureControl(
             title: "Thumb button",
-            subtitle: "The button under the thumb rest."
-        ) {
+            subtitle: hasHapticPanel
+                ? "The haptic sense panel under the thumb rest. Press it, or hold it and move the mouse."
+                : "The button under the thumb rest.",
+            noun: hasHapticPanel ? "panel" : "button",
+            path: \.buttons.thumbButton
+        )
+    }
+
+    private var gestureButton: some View {
+        gestureControl(
+            title: "Gesture button",
+            subtitle: "The extra button on the side, next to back and forward.",
+            noun: "button",
+            path: \.buttons.gestureButton
+        )
+    }
+
+    private func gestureControl(
+        title: String,
+        subtitle: String,
+        noun: String,
+        path: WritableKeyPath<DeviceConfiguration, GestureButtonSettings>
+    ) -> some View {
+        let tap = path.appending(path: \.tap)
+        let gestures = path.appending(path: \.gestures)
+
+        return SettingsSection(title: title, subtitle: subtitle) {
             ManagedSetting(
                 title: "Action on press",
                 help: "What a plain press does. Leave the gestures below switched off to make this "
                     + "an ordinary extra button.",
-                isManaged: model.enabled(\.buttons.thumbButton.tap),
-                override: model.override(\.buttons.thumbButton.tap)
+                isManaged: model.enabled(tap),
+                override: model.override(tap)
             ) {
-                ActionPicker(label: "Press", action: model.value(\.buttons.thumbButton.tap))
+                ActionPicker(label: "Press", action: model.value(tap))
                     .frame(width: 320)
             }
 
@@ -177,26 +211,26 @@ struct ButtonsSection: View {
 
             ManagedSetting(
                 title: "Flick gestures",
-                help: "Hold the button and move the mouse. Switch this off and the button stops "
+                help: "Hold the \(noun) and move the mouse. Switch this off and the \(noun) stops "
                     + "caring about movement entirely.",
-                isManaged: model.enabled(\.buttons.thumbButton.gestures),
-                override: model.override(\.buttons.thumbButton.gestures)
+                isManaged: model.enabled(gestures),
+                override: model.override(gestures)
             ) {
-                gestureEditor
+                gestureEditor(path)
             }
         }
     }
 
     @ViewBuilder
-    private var gestureEditor: some View {
+    private func gestureEditor(_ path: WritableKeyPath<DeviceConfiguration, GestureButtonSettings>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            directionEditor(model.value(\.buttons.thumbButton.gestures), name: \.displayName, unset: .none)
+            directionEditor(model.value(path.appending(path: \.gestures)), name: \.displayName, unset: .none)
 
             // How far a flick travels is a feel for the hand, not for the
             // window, so it is set once for all applications.
             LabelledSlider(
                 label: "Flick distance",
-                value: model.binding(\.buttons.thumbButton.threshold),
+                value: model.binding(path.appending(path: \.threshold)),
                 range: 20 ... 200,
                 step: 5,
                 format: { String(format: "%.0f", $0) }

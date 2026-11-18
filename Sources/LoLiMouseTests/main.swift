@@ -55,23 +55,34 @@ suite("Configuration") {
         expectEqual(configuration.buttons.managesAnything, false)
     }
 
+    let mxMaster3S: Set<HIDPPControlID> = [0x0050, 0x0051, 0x0052, 0x0053, 0x0056, 0x00C3, 0x00C4]
+
     test("no HID++ control is diverted until a button is configured") {
         var buttons = ButtonSettings()
-        expectEqual(buttons.divertedControls.isEmpty, true)
+        expectEqual(buttons.divertsAnything, false)
+        expectEqual(buttons.divertedControls(among: mxMaster3S).isEmpty, true)
 
         buttons.wheelModeButton.enabled = true
-        expectEqual(buttons.divertedControls, [HIDPPControl.wheelModeButton])
+        expectEqual(buttons.divertedControls(among: mxMaster3S), [HIDPPControl.wheelModeButton])
 
         buttons.thumbButton.tap.enabled = true
-        expect(buttons.divertedControls.isSuperset(of: HIDPPControl.gestureCapable),
-               "configuring the thumb button must divert every gesture-capable control")
+        expectEqual(buttons.divertedControls(among: mxMaster3S),
+                    [HIDPPControl.wheelModeButton, HIDPPControl.gestureButton])
     }
 
     test("switching a button back off stops diverting it") {
         var buttons = ButtonSettings()
         buttons.wheelModeButton.enabled = true
         buttons.wheelModeButton.enabled = false
-        expectEqual(buttons.divertedControls.isEmpty, true)
+        expectEqual(buttons.divertsAnything, false)
+        expectEqual(buttons.divertedControls(among: mxMaster3S).isEmpty, true)
+    }
+
+    test("a control the mouse does not have is never diverted") {
+        var buttons = ButtonSettings()
+        buttons.wheelModeButton.enabled = true
+        buttons.thumbButton.tap.enabled = true
+        expectEqual(buttons.divertedControls(among: [0x0050, 0x0051]).isEmpty, true)
     }
 
     test("a full configuration round-trips through JSON") {
@@ -286,7 +297,7 @@ suite("Application profiles — one app, its own wheel and buttons") {
         expectEqual(untouched.buttons.wheelModeButton.enabled, false,
                     "the button is the firmware's everywhere else, so no profile may divert it")
         expectEqual(untouched.buttons.thumbButton.tap.enabled, false)
-        expectEqual(untouched.buttons.divertedControls, [])
+        expectEqual(untouched.buttons.divertsAnything, false)
 
         device.buttons.wheelModeButton = .on(.cycleDPIPresets)
         device.buttons.thumbButton.tap = .on(.missionControl)
@@ -1689,6 +1700,89 @@ suite("Settings transfer — a new mouse inherits the old one's settings") {
     test("suggested file names contain no path separators") {
         expectEqual(DeviceSettingsFile.suggestedFileName(for: "Mouse/Pad: 2"),
                     "Mouse-Pad- 2 — LoLiMouse settings.json")
+    }
+}
+
+// MARK: - MX Master 4: haptic panel and side gesture button
+
+suite("Haptic panel — the thumb settings follow the thumb, not the CID") {
+    let mxMaster3S: Set<HIDPPControlID> = [0x0050, 0x0051, 0x0052, 0x0053, 0x0056, 0x00C3, 0x00C4]
+    // As OpenLogi reads it: the gesture button moved to the side, the haptic
+    // panel under the thumb.
+    let mxMaster4: Set<HIDPPControlID> = [0x0050, 0x0051, 0x0052, 0x0053, 0x0056, 0x00C3, 0x00C4, 0x01A0]
+
+    test("without a panel the gesture button is the thumb button") {
+        expectEqual(HIDPPControl.gestureRole(of: 0x00C3, hasHapticPanel: false), .thumbRest)
+        expectEqual(HIDPPControl.controls(for: .thumbRest, among: mxMaster3S), [0x00C3])
+        expectEqual(HIDPPControl.controls(for: .sideGestureButton, among: mxMaster3S), [])
+    }
+
+    test("with a panel the panel is the thumb button and the gesture button is separate") {
+        expectEqual(HIDPPControl.gestureRole(of: 0x01A0, hasHapticPanel: true), .thumbRest)
+        expectEqual(HIDPPControl.gestureRole(of: 0x00C3, hasHapticPanel: true), .sideGestureButton)
+        expectEqual(HIDPPControl.controls(for: .thumbRest, among: mxMaster4), [0x01A0])
+        expectEqual(HIDPPControl.controls(for: .sideGestureButton, among: mxMaster4), [0x00C3])
+    }
+
+    test("ordinary controls have no gesture role") {
+        expectNil(HIDPPControl.gestureRole(of: 0x00C4, hasHapticPanel: true))
+        expectNil(HIDPPControl.gestureRole(of: 0x0053, hasHapticPanel: false))
+    }
+
+    test("settings copied from an MX Master 3S divert the panel, not the side button") {
+        var buttons = ButtonSettings()
+        buttons.thumbButton.gestures = .on([.up: .missionControl])
+        expectEqual(buttons.divertedControls(among: mxMaster3S), [0x00C3])
+        expectEqual(buttons.divertedControls(among: mxMaster4), [0x01A0])
+    }
+
+    test("the side gesture button is diverted only when its own settings are on") {
+        var buttons = ButtonSettings()
+        buttons.gestureButton.tap = .on(.showDesktop)
+        expectEqual(buttons.divertsAnything, true)
+        expectEqual(buttons.divertedControls(among: mxMaster4), [0x00C3])
+        // On a mouse without a panel there is no separate button to take over.
+        expectEqual(buttons.divertedControls(among: mxMaster3S), [])
+
+        buttons.thumbButton.tap = .on(.missionControl)
+        expectEqual(buttons.divertedControls(among: mxMaster4), [0x00C3, 0x01A0])
+    }
+
+    test("each role runs its own settings") {
+        var buttons = ButtonSettings()
+        buttons.thumbButton.tap = .on(.missionControl)
+        buttons.gestureButton.tap = .on(.showDesktop)
+        expectEqual(buttons.settings(for: .thumbRest).tap, .on(.missionControl))
+        expectEqual(buttons.settings(for: .sideGestureButton).tap, .on(.showDesktop))
+    }
+
+    test("a config file from before the gesture button still decodes") {
+        var buttons = ButtonSettings()
+        buttons.thumbButton.tap = .on(.missionControl)
+        guard let data = try? JSONEncoder().encode(buttons),
+              var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            expect(false, "encoding failed")
+            return
+        }
+        object.removeValue(forKey: "gestureButton")
+        do {
+            let old = try JSONSerialization.data(withJSONObject: object)
+            let decoded = try JSONDecoder().decode(ButtonSettings.self, from: old)
+            expectEqual(decoded.thumbButton.tap, .on(.missionControl))
+            expectEqual(decoded.gestureButton.managesAnything, false)
+        } catch {
+            expect(false, "decoding failed: \(error)")
+        }
+    }
+
+    test("the gesture button can differ per application once it is taken over") {
+        var device = DeviceConfiguration()
+        expectEqual(OverridableSetting.gestureButtonTap.isAllowed(over: device), false)
+        device.buttons.gestureButton.tap = .on(.showDesktop)
+        expectEqual(OverridableSetting.gestureButtonTap.isAllowed(over: device), true)
+        expectEqual(OverridableSetting(path: \DeviceConfiguration.buttons.gestureButton.gestures),
+                    .gestureButtonGestures)
     }
 }
 

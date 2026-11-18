@@ -417,7 +417,8 @@ public enum GestureDirection: String, Codable, Equatable, CaseIterable, Sendable
     }
 }
 
-/// The thumb button, and what it does when held and flicked.
+/// A button that can be held and flicked — the thumb button, or the MX
+/// Master 4's separate gesture button — and what it does.
 public struct GestureButtonSettings: Codable, Equatable, Sendable {
     /// What a plain press does, with no movement.
     public var tap: Setting<Action>
@@ -451,34 +452,73 @@ public struct ButtonSettings: Codable, Equatable, Sendable {
     /// The small button below the scroll wheel (HID++ control 0x00C4).
     /// Diverted only when managed, so its factory behaviour survives otherwise.
     public var wheelModeButton: Setting<Action>
-    /// The thumb button (HID++ control 0x00C3 and friends).
+    /// Whatever is under the thumb rest: the gesture button (HID++ control
+    /// 0x00C3 and friends), or the haptic panel (0x01A0) on a mouse that has
+    /// one. Named for the place rather than the control, so settings copied
+    /// from an MX Master 3S land under the same thumb on an MX Master 4.
     public var thumbButton: GestureButtonSettings
+    /// The gesture button on a mouse whose thumb rest is the haptic panel,
+    /// where it is a separate button on the side. Unused on other mice: there
+    /// the gesture button *is* the thumb button.
+    public var gestureButton: GestureButtonSettings
 
     public init(
         mappings: Setting<[ButtonMapping]> = .off([]),
         wheelModeButton: Setting<Action> = .off(.cycleDPIPresets),
-        thumbButton: GestureButtonSettings = GestureButtonSettings()
+        thumbButton: GestureButtonSettings = GestureButtonSettings(),
+        gestureButton: GestureButtonSettings = GestureButtonSettings()
     ) {
         self.mappings = mappings
         self.wheelModeButton = wheelModeButton
         self.thumbButton = thumbButton
+        self.gestureButton = gestureButton
     }
 
-    /// Which HID++ controls need diverting for the current configuration.
-    /// Anything not listed here keeps behaving exactly as the factory intended.
-    public var divertedControls: Set<HIDPPControlID> {
+    // `gestureButton` arrived in 0.9.1; a file written before it lacks the key.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mappings = try container.decodeIfPresent(Setting<[ButtonMapping]>.self, forKey: .mappings) ?? .off([])
+        wheelModeButton = try container.decodeIfPresent(Setting<Action>.self, forKey: .wheelModeButton)
+            ?? .off(.cycleDPIPresets)
+        thumbButton = try container.decodeIfPresent(GestureButtonSettings.self, forKey: .thumbButton)
+            ?? GestureButtonSettings()
+        gestureButton = try container.decodeIfPresent(GestureButtonSettings.self, forKey: .gestureButton)
+            ?? GestureButtonSettings()
+    }
+
+    /// Whether any HID++ control needs diverting. Which ones depends on the
+    /// mouse — see `divertedControls(among:)`.
+    public var divertsAnything: Bool {
+        wheelModeButton.enabled || thumbButton.managesAnything || gestureButton.managesAnything
+    }
+
+    /// Which of the controls a mouse has (`available`) need diverting for the
+    /// current configuration. Anything not listed keeps behaving exactly as
+    /// the factory intended.
+    public func divertedControls(among available: Set<HIDPPControlID>) -> Set<HIDPPControlID> {
         var controls: Set<HIDPPControlID> = []
         if wheelModeButton.enabled {
             controls.insert(HIDPPControl.wheelModeButton)
         }
         if thumbButton.managesAnything {
-            controls.formUnion(HIDPPControl.gestureCapable)
+            controls.formUnion(HIDPPControl.controls(for: .thumbRest, among: available))
         }
-        return controls
+        if gestureButton.managesAnything {
+            controls.formUnion(HIDPPControl.controls(for: .sideGestureButton, among: available))
+        }
+        return controls.intersection(available)
+    }
+
+    /// The settings that drive a gesture role.
+    public func settings(for role: HIDPPControl.GestureRole) -> GestureButtonSettings {
+        switch role {
+        case .thumbRest: return thumbButton
+        case .sideGestureButton: return gestureButton
+        }
     }
 
     public var managesAnything: Bool {
-        mappings.enabled || wheelModeButton.enabled || thumbButton.managesAnything
+        mappings.enabled || divertsAnything
     }
 }
 

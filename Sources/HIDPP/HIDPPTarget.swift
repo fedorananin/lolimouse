@@ -22,8 +22,10 @@ public final class HIDPPTarget {
     private var controlTableCache: [HIDPPControlInfo]?
 
     /// The device's control table, once it has been read. Fixed in firmware, so
-    /// it only has to be fetched once per connection.
-    var cachedControlTable: [HIDPPControlInfo]? {
+    /// it only has to be fetched once per connection. Public for readers on
+    /// the notification thread, which must never issue a transaction of their
+    /// own: the answer would arrive on the very thread that is waiting for it.
+    public internal(set) var cachedControlTable: [HIDPPControlInfo]? {
         get {
             cacheLock.lock()
             defer { cacheLock.unlock() }

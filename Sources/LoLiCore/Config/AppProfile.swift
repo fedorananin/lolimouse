@@ -36,6 +36,8 @@ public enum OverridableSetting: String, CaseIterable, Codable, Hashable, Sendabl
     case wheelModeButton = "buttons.wheelModeButton"
     case thumbButtonTap = "buttons.thumbButton.tap"
     case thumbButtonGestures = "buttons.thumbButton.gestures"
+    case gestureButtonTap = "buttons.gestureButton.tap"
+    case gestureButtonGestures = "buttons.gestureButton.gestures"
     case threeFingerTap = "trackpad.threeFingerTap"
     case fourFingerTap = "trackpad.fourFingerTap"
     case threeFingerSwipes = "trackpad.threeFingerSwipes"
@@ -63,6 +65,8 @@ public enum OverridableSetting: String, CaseIterable, Codable, Hashable, Sendabl
             return base.buttons.wheelModeButton.enabled
         case .thumbButtonTap, .thumbButtonGestures:
             return base.buttons.thumbButton.managesAnything
+        case .gestureButtonTap, .gestureButtonGestures:
+            return base.buttons.gestureButton.managesAnything
         default:
             return true
         }
@@ -84,6 +88,8 @@ public enum OverridableSetting: String, CaseIterable, Codable, Hashable, Sendabl
         case .wheelModeButton: return Accessor(\.buttons.wheelModeButton)
         case .thumbButtonTap: return Accessor(\.buttons.thumbButton.tap)
         case .thumbButtonGestures: return Accessor(\.buttons.thumbButton.gestures)
+        case .gestureButtonTap: return Accessor(\.buttons.gestureButton.tap)
+        case .gestureButtonGestures: return Accessor(\.buttons.gestureButton.gestures)
         case .threeFingerTap: return Accessor(\.trackpad.threeFingerTap)
         case .fourFingerTap: return Accessor(\.trackpad.fourFingerTap)
         case .threeFingerSwipes: return Accessor(\.trackpad.threeFingerSwipes)
