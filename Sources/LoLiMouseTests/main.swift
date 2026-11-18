@@ -1583,4 +1583,113 @@ suite("Custom actions — shortcuts, clicks and scrolls") {
     }
 }
 
+// MARK: - Settings transfer
+
+suite("Settings transfer — a new mouse inherits the old one's settings") {
+    func configured(_ name: String, dpi: Int) -> DeviceConfiguration {
+        var configuration = DeviceConfiguration(displayName: name)
+        configuration.hardware.dpi = .on(dpi)
+        configuration.apps["com.colliderli.iina"] = AppProfile(name: "IINA")
+        return configuration
+    }
+
+    test("copying replaces the target's settings whole but keeps its name") {
+        var configuration = Configuration()
+        configuration.devices["unit:OLD"] = configured("MX Master 3S", dpi: 1600)
+        var target = DeviceConfiguration(displayName: "MX Master 4")
+        target.pointer.speed = .on(0.7)
+        configuration.devices["unit:NEW"] = target
+
+        configuration.copySettings(from: "unit:OLD", to: "unit:NEW", name: "MX Master 4")
+
+        let copied = configuration.device("unit:NEW")
+        expectEqual(copied.displayName, "MX Master 4")
+        expectEqual(copied.hardware.dpi.effective, 1600)
+        expectEqual(copied.apps.keys.sorted(), ["com.colliderli.iina"])
+        // Not in the source, so switched off: the reconciler restores it.
+        expectNil(copied.pointer.speed.effective)
+        // The source is left alone.
+        expectEqual(configuration.device("unit:OLD").displayName, "MX Master 3S")
+    }
+
+    test("copying onto a device with no entry yet creates one") {
+        var configuration = Configuration()
+        configuration.devices["unit:OLD"] = configured("MX Master 3S", dpi: 1600)
+        configuration.copySettings(from: "unit:OLD", to: "unit:NEW", name: "MX Master 4")
+        expectEqual(configuration.devices["unit:NEW"]?.hardware.dpi.effective, 1600)
+        expectEqual(configuration.devices["unit:NEW"]?.displayName, "MX Master 4")
+    }
+
+    test("copying from a device without settings, or onto itself, changes nothing") {
+        var configuration = Configuration()
+        configuration.devices["unit:NEW"] = configured("MX Master 4", dpi: 800)
+        let before = configuration
+        configuration.copySettings(from: "unit:MISSING", to: "unit:NEW", name: nil)
+        configuration.copySettings(from: "unit:NEW", to: "unit:NEW", name: nil)
+        expectEqual(configuration, before)
+    }
+
+    test("sources leave out the target and devices with nothing switched on") {
+        var configuration = Configuration()
+        configuration.devices["unit:OLD"] = configured("MX Master 3S", dpi: 1600)
+        configuration.devices["unit:NEW"] = configured("MX Master 4", dpi: 800)
+        configuration.devices["usb:05AC:0265"] = DeviceConfiguration(displayName: "Trackpad")
+        expectEqual(configuration.settingsSources(for: "unit:NEW"),
+                    [SettingsSource(key: "unit:OLD", name: "MX Master 3S")])
+    }
+
+    test("two mice of the same model are told apart by unit ID") {
+        var configuration = Configuration()
+        configuration.devices["unit:AAAA1111"] = configured("MX Master 3S", dpi: 1600)
+        configuration.devices["unit:BBBB2222"] = configured("MX Master 3S", dpi: 800)
+        configuration.devices["unit:NEW"] = DeviceConfiguration()
+        expectEqual(configuration.settingsSources(for: "unit:NEW").map(\.name),
+                    ["MX Master 3S (AAAA1111)", "MX Master 3S (BBBB2222)"])
+    }
+
+    test("a settings file round-trips and drops the source device's name") {
+        let file = DeviceSettingsFile(deviceName: "MX Master 3S", settings: configured("MX Master 3S", dpi: 1600))
+        guard let data = try? file.encoded(), let decoded = try? DeviceSettingsFile.decode(data) else {
+            expect(false, "round trip failed")
+            return
+        }
+        expectEqual(decoded, file)
+        expectEqual(decoded.deviceName, "MX Master 3S")
+        expectNil(decoded.settings.displayName)
+        expectEqual(decoded.settings.hardware.dpi.effective, 1600)
+    }
+
+    test("any other JSON is refused rather than read as empty settings") {
+        // `{}` would decode as a DeviceConfiguration with nothing on, and
+        // importing it would silently wipe the target.
+        for json in [#"{}"#, #"{"hardware": {}}"#, #"{"schemaVersion": 1, "devices": {}}"#, "not json"] {
+            do {
+                _ = try DeviceSettingsFile.decode(Data(json.utf8))
+                expect(false, "\(json) was accepted")
+            } catch let error as DeviceSettingsFile.ReadError {
+                expectEqual(error, .notASettingsFile)
+            } catch {
+                expect(false, "unexpected error \(error)")
+            }
+        }
+    }
+
+    test("a file from a newer format is refused with a reason") {
+        let json = #"{"format": "me.fedorananin.LoLiMouse.device-settings", "version": 99, "settings": {}}"#
+        do {
+            _ = try DeviceSettingsFile.decode(Data(json.utf8))
+            expect(false, "a newer format was accepted")
+        } catch let error as DeviceSettingsFile.ReadError {
+            expectEqual(error, .newerVersion(99))
+        } catch {
+            expect(false, "unexpected error \(error)")
+        }
+    }
+
+    test("suggested file names contain no path separators") {
+        expectEqual(DeviceSettingsFile.suggestedFileName(for: "Mouse/Pad: 2"),
+                    "Mouse-Pad- 2 — LoLiMouse settings.json")
+    }
+}
+
 report()

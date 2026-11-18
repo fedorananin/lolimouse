@@ -168,6 +168,22 @@ Per-application profiles:
   some applications ignore keystrokes delivered that way, so it needs trying
   first.
 
+Moving to a new mouse:
+
+- **Copy settings from another device.** "Transfer Settings" at the top of a
+  device's page lists every other device with settings — including mice that
+  are no longer connected — and copies one's settings across in a click:
+  every setting and every application profile. Two mice of the same model are
+  told apart by unit ID.
+- **Export to a file, import from a file**, to carry one device's settings to
+  another Mac or keep a copy. The file is the device's settings as JSON with a
+  format marker, so a file that is not a LoLiMouse settings file is refused
+  rather than read as "nothing switched on".
+- A copy or import **replaces** the device's settings whole and asks first if
+  there was anything to lose. A setting switched on before and absent from
+  the copy is switched off, and its original value is put back. Settings the
+  new mouse has no hardware for are kept and skipped.
+
 And the small things:
 
 - **Battery level** in the menu and in the settings window, over HID++. Each

@@ -184,7 +184,7 @@ Verified on hardware (MX Master 3S over Bluetooth LE):
   aside while Mission Control is up (`OverviewWatch`,
   `isWindowOverviewShowing`; the backdrop window's signature was measured on
   macOS 27 only).
-- 143 tests pass.
+- 152 tests pass.
 
 **Not yet verified on hardware** — written from the protocol specifications and
 the two reference implementations, never exercised against a real device:
@@ -207,6 +207,8 @@ the two reference implementations, never exercised against a real device:
 - The `restoreMinimizedOrHidden` action (`WindowActions`, `RestoreHistory`):
   un-minimising and raising through Accessibility, unhiding, and bringing
   the application to the front from a menu bar agent
+- Settings transfer (`SettingsTransfer.swift`, `SettingsTransferMenu`):
+  copying from another device, export and import through a file
 
 Do not describe any of the above as working until it has been seen working.
 

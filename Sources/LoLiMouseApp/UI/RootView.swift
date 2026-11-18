@@ -259,6 +259,7 @@ struct DeviceDetailView: View {
             Spacer()
             batteryBadge
             statusBadge
+            SettingsTransferMenu(device: device)
         }
         .padding(20)
     }
